@@ -2,6 +2,8 @@
 
 > A heredoc replacement, agent-friendly file tool, and nano-style editor — all in one static C++17 binary with zero runtime dependencies.
 
+![hed feature poster](hed-poster.png)
+
 ---
 
 ## Overview
