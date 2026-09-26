@@ -22,7 +22,7 @@
 
 using namespace hed;
 
-static const char* VERSION = "1.0.0";
+static const char* VERSION = "1.1.0";
 static bool g_color = false;
 
 enum Exit { EX_OK = 0, EX_NOTFOUND = 1, EX_USAGE = 2, EX_AMBIG = 3 };
