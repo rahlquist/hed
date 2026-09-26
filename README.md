@@ -157,7 +157,11 @@ Mouse: **click** moves the cursor, **scroll wheel** scrolls. The status bar alwa
 
 **Also:** auto-indent (language-aware extra indent after `:`, `{`, `then`, `function`…), smart Home, bracketed paste, UTF-8/wide characters, CRLF preservation, indentation style detection, `+LINE:COL` on the command line, and crash recovery via swap files (`~/.config/hed/swap/`).
 
-**Configuration:** editor settings (tab size, indent style, spell, line numbers, syntax theme, log size) live in `~/.config/hed/config` — view or edit them with `hed config`. Status messages are logged to `~/.config/hed/log/` and shown with `hed log`.
+**Editor feedback:** live search shows a `match X of Y` counter; replace prompts show `(X of Y)` plus a context snippet (`ln N: …pre [MATCH] post…`); undo/redo report remaining depth (`U n R n`); comment toggling reports the affected line range; the title bar truncates long filenames with an ellipsis and turns into a solid **red bar** in read-only mode; the help bar truncates labels with an ellipsis on narrow terminals.
+
+**Configuration:** editor settings (tab size, indent style, spell, line numbers, syntax theme, log size) live in `~/.config/hed/config` — view or edit them with `hed config`. Three syntax themes are available: `catppuccin`, `dark`, and `light`. Status messages are logged to `~/.config/hed/log/` and shown with `hed log`.
+
+**Shell completions:** `make install` installs tab-completion for **bash**, **fish**, and **zsh** (all commands, options, languages, and theme values). `hed langs --help` lists the supported languages.
 
 ---
 

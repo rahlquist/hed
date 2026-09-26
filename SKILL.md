@@ -63,6 +63,20 @@ Positions: `--at N`, `--before N`, `--after N` (0 = top), `--start`, `--end`,
 text/HTML: all prose. Identifiers, paths, URLs, ACRONYMS and camelCase are skipped.
 Add project words: `hed spell --add kubeconfig --add homelab` (~/.config/hed/words.txt).
 
+## Editor config & status log
+The interactive editor reads settings from `~/.config/hed/config` (tab size, indent,
+spell, line numbers, syntax theme, log size). Query or set them without opening the
+editor:
+```bash
+hed config                 # print the config path and effective settings
+hed config get theme       # catppuccin | dark | light
+hed config set theme dark  # set and save
+hed log 20                 # last 20 status messages the editor logged
+```
+Themes: `catppuccin`, `dark`, `light`. The editor also supports mouse (click to move
+cursor, wheel to scroll), crash recovery via swap files (`~/.config/hed/swap/`), and
+live search/replace feedback (`match X of Y`). `hed langs --help` lists languages.
+
 ## Rules of thumb
 * Prefer `hed replace` over rewriting whole files; prefer `hed write` over heredocs.
 * Quote OLD/NEW with single quotes. Don't use `sed -i` for code edits.

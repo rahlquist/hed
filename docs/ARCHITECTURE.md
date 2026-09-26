@@ -28,16 +28,21 @@ flowchart TB
         C --> C6[delete]
         C --> C7[spell]
         C --> C8[langs]
+        C --> C9[config]
+        C --> C10[log]
     end
 
     subgraph "Interactive Editor (editor.cpp)"
         D --> D1[Raw VT100 terminal]
-        D1 --> D2[Key parser]
+        D1 --> D2[Key parser + mouse]
         D2 --> D3[Editor class]
         D3 --> D4[Buffer: vector of strings]
         D3 --> D5[Undo/Redo stacks]
-        D3 --> D6[Search/Replace]
+        D3 --> D6[Search/Replace + match counter]
         D3 --> D7[Spell walk]
+        D3 --> D8[Config + themes]
+        D3 --> D9[Swap file / crash recovery]
+        D3 --> D10[Status message log]
     end
 
     subgraph Shared
@@ -75,11 +80,11 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    main["main.cpp<br/>1051 lines<br/>CLI dispatch + one-shot commands"]
-    editor["editor.cpp<br/>1348 lines<br/>Nano-style editor"]
-    highlight["highlight.cpp<br/>894 lines<br/>Syntax highlighter"]
+    main["main.cpp<br/>1233 lines<br/>CLI dispatch + one-shot commands"]
+    editor["editor.cpp<br/>1745 lines<br/>Nano-style editor"]
+    highlight["highlight.cpp<br/>944 lines<br/>Syntax highlighter"]
     spell["spell.cpp<br/>346 lines<br/>Spell checker"]
-    util["util.cpp<br/>554 lines<br/>I/O, diff, text utilities"]
+    util["util.cpp<br/>562 lines<br/>I/O, diff, text utilities"]
 
     main -->|runEditor| editor
     main -->|highlightLine| highlight
@@ -97,22 +102,31 @@ flowchart LR
 ### main.cpp — CLI Dispatch & One-shot Commands
 
 - **Argument parser** (`parseArgs`): Supports `--long`, `-s`, `-sVALUE`, `--long=VALUE`, `--` end-of-options. Global `--color=auto|always|never` and `--no-color`.
-- **Command dispatch** (`main`): Routes to `cmdWrite`, `cmdShow`, `cmdSearch`, `cmdReplace`, `cmdInsert`, `cmdDelete`, `cmdSpell`, or `cmdEdit`.
+- **Command dispatch** (`main`): Routes to `cmdWrite`, `cmdShow`, `cmdSearch`, `cmdReplace`, `cmdInsert`, `cmdDelete`, `cmdSpell`, `cmdConfig`, `cmdLog`, `cmdLangs`, or `cmdEdit`. `config` and `log` are new commands for the editor's configuration file and status-message log; `langs` now also accepts `--help`.
 - **Shared helpers**: `getText` (resolves `-c`/`--from`/stdin), `resolveLang` (explicit `--lang` or auto-detect), `showText` (highlighted output), `printDiff` (unified diff).
 - **FileBuf**: Used by replace/insert/delete. Holds `raw` (on-disk bytes), `text` (LF-normalised), and `crlf` flag. `loadBuf` normalises CRLF→LF; `toDisk` converts back.
 - **finishEdit**: Shared epilogue for replace/insert/delete — handles `--dry-run`, `--backup`, `--json`, `--quiet`, diff printing.
 
 ### editor.cpp — Nano-style Editor
 
-- **Editor class**: All state in one class — buffer (`vector<string> L`), cursor (`cx`, `cy`), scroll offsets (`rowoff`, `coloff`), undo/redo stacks, clipboard, mark, search state, spell state.
-- **Terminal layer**: Raw VT100/xterm. `enableRaw()` sets termios raw mode, enters alternate screen (`\x1b[?1049h`), enables bracketed paste (`\x1b[?2004h`). `restoreTerm()` on exit.
-- **Key parser** (`readKey`): Reads bytes, handles ESC sequences (CSI, SS3, Alt+key). Returns key codes. Supports arrow keys, Home/End, PgUp/PgDn, Delete, F1–F12, Ctrl+arrows, Alt+arrows, bracketed paste.
+- **Editor class**: All state in one class — buffer (`vector<string> L`), cursor (`cx`, `cy`), scroll offsets (`rowoff`, `coloff`), undo/redo stacks, clipboard, mark, search state, spell state, mouse state, swap-file state, and a status-message ring buffer.
+- **Terminal layer**: Raw VT100/xterm. `enableRaw()` sets termios raw mode, enters alternate screen (`\x1b[?1049h`), enables bracketed paste (`\x1b[?2004h`), and enables **mouse reporting** (`\x1b[?1000h` — press/release + scroll wheel). `restoreTerm()` on exit.
+- **Key parser** (`readKey`): Reads bytes, handles ESC sequences (CSI, SS3, Alt+key). Returns key codes. Supports arrow keys, Home/End, PgUp/PgDn, Delete, F1–F12, Ctrl+arrows, Alt+arrows, bracketed paste, and **SGR mouse events** (`ESC [ < btn ; col ; row M/m`).
+- **Mouse** (`process`): A click moves the cursor to the clicked cell (accounting for the title bar and line-number gutter); the scroll wheel scrolls the viewport.
 - **Rendering** (`refresh`): Builds the entire screen in a single string buffer, then one `writeAll`. Title bar, text rows with line numbers, bottom help/status bar. Cursor positioned at end.
+  - **Title bar ellipsis**: long filenames are truncated with a leading `…` marker to fit the terminal width.
+  - **Read-only red bar**: in read-only mode the whole title row is drawn as a solid red bar (white on red).
+  - **Permanent position**: the status bar's right side always shows `Ln X, Col Y` (plus `U n R n` undo/redo depth when no prompt is active), even while a message is displayed.
+  - **Help bar ellipsis**: on narrow terminals, help-bar labels are truncated with an ellipsis; a label is dropped entirely if it cannot fit.
 - **Highlighting cache** (`hlStart`, `hlValid`): Per-line `HlState` array. `lineHl(y)` computes highlight for line `y` by replaying states from `hlValid` forward. `invalidate(y)` truncates cache on edit.
-- **Undo/Redo**: Snapshot-based. Each snapshot stores `{L, cx, cy, ver}`. Coalesces rapid same-line edits within 1.5 s. Depth limit scales with buffer size (500 for small, 10 for >4 MB).
-- **Editing ops**: `insertByte`, `newline` (with auto-indent for Python/brace/shell/fish), `backspace` (with smart dedent), `tab`/`dedentLines`, `cut`/`copy`/`paste`, `toggleComment`, `moveLine`, `dupLine`.
-- **Search**: `find` (prompt with live preview), `findNext`, `replace` (interactive y/n/a). Smart-case: lowercase query = case-insensitive.
-- **Spell walk** (`spellWalk`): Iterates misspellings, offers suggestions (1–9), add-to-dictionary, ignore, edit, or skip.
+- **Undo/Redo**: Snapshot-based. Each snapshot stores `{L, cx, cy, ver}`. Coalesces rapid same-line edits within 1.5 s. Depth limit scales with buffer size (500 for small, 10 for >4 MB). Undo/redo report remaining depth in the status bar (`Undo (n)` / `Redo (n)`).
+- **Editing ops**: `insertByte`, `newline` (with auto-indent for Python/brace/shell/fish), `backspace` (with smart dedent), `tab`/`dedentLines`, `cut`/`copy`/`paste`, `toggleComment`, `moveLine`, `dupLine`. `toggleComment` reports the affected range (`Commented lines A-B` / `Uncommented lines A-B`).
+- **Search**: `find` (prompt with live preview), `findNext`, `replace` (interactive y/n/a). Smart-case: lowercase query = case-insensitive. `countMatches`/`matchIndex` drive a **`match X of Y` counter** in the status bar; the replace prompt shows `(X of Y)` plus a context snippet (`ln N: "…pre [MATCH] post…"`) via `matchContext`.
+- **Spell walk** (`spellWalk`): Iterates misspellings, offers up to **6** suggestions (keys `1`–`6`), add-to-dictionary, ignore, edit, or skip.
+- **Status message log**: every status message is appended to `~/.config/hed/log/YYYY-MM-DD.log` and kept in an in-memory ring buffer sized by `log_size` (config), so `hed log` can show it later.
+- **Crash recovery (swap files)**: while editing a named file, the buffer is flushed to `~/.config/hed/swap/FILENAME.swp` every ~30 s while dirty. On startup, if the swap file is newer than the original, hed prompts **"Swap file found, press R to recover"** (`R` restores, any other key discards). The swap file is removed on a clean exit.
+- **Config + themes**: editor settings (tab size, indent, spell, numbers, theme, log size) are loaded from `~/.config/hed/config` via `loadConfig()` (precedence: CLI flags > `HED_*` env vars > config file > defaults). The syntax theme (`catppuccin` | `dark` | `light`) is applied via `setTheme()`.
+- **Missing-terminal error**: if no TTY is available, hed prints a clear message pointing to the one-shot commands and exits 2.
 - **Pipe mode**: When stdin/stdout is not a TTY, opens `/dev/tty` for the editor UI. On `^X`, writes buffer to stdout. On `^Q`, exits with code 1.
 
 ### highlight.cpp — Syntax Highlighter
@@ -125,6 +139,7 @@ flowchart LR
   - `hlMarkdown`: Line-oriented (fences, headings, inline code, links, comments).
 - **Highlight types** (`Hl` enum): `H_NORMAL`, `H_COMMENT`, `H_STRING`, `H_NUMBER`, `H_KEYWORD`, `H_TYPE`, `H_BUILTIN`, `H_FUNCTION`, `H_VARIABLE`, `H_CONSTANT`, `H_TAG`, `H_ATTR`, `H_PREPROC`, `H_ESCAPE`, `H_PROPERTY`, `H_OPERATOR`.
 - **Output**: `highlightLine` fills a `vector<uint8_t>` (one byte per input byte). `hlSgr` maps each type to an SGR escape sequence. `renderAnsi` produces the final string with optional underline overlays.
+- **Themes** (`setTheme`): three colour palettes — `catppuccin` (the original hed look), `dark` (vivid colours for dark terminals), and `light` (darker foregrounds readable on a light background). The active palette is selected by the `theme` config setting; unknown names fall back to `catppuccin`. `hlSgr` looks up colours from the active `Palette`.
 
 ### spell.cpp — Spell Checker
 
@@ -148,7 +163,7 @@ flowchart LR
 - **Indent**: `dedent` (strips common leading whitespace), `stripLeadingTabs`.
 - **Range parsing** (`parseRange`): `N`, `A:B`, `A:`, `:B`, `A:+N`, `-N:` (last N lines).
 - **JSON**: `jsonEscape`.
-- **Config**: `homeDir`, `configDir` (`~/.config/hed` or `$XDG_CONFIG_HOME/hed`).
+- **Config**: `homeDir`, `configDir` (`~/.config/hed` or `$XDG_CONFIG_HOME/hed`), `configFilePath`, `loadConfig` (defaults + INI file + `HED_*` env vars), `saveConfig`, `appendStatusLog` (writes to `~/.config/hed/log/YYYY-MM-DD.log`), and swap-file helpers (`fileMtime`, `mkdirParents`).
 
 ---
 
@@ -508,3 +523,8 @@ These are consistent across all one-shot commands, making `hed` scriptable:
 - **Unified diff**: Myers algorithm with a 3000-edit limit. For very different
   files, falls back to delete-all-insert-all. Used by `replace`, `insert`,
   `delete`, and `write --diff`.
+- **Config precedence**: editor settings resolve as **CLI flags > `HED_*` env vars > `~/.config/hed/config` > built-in defaults**, so a config file never overrides an explicit flag.
+- **Crash recovery**: swap files (`~/.config/hed/swap/`) are flushed every ~30 s while dirty, so a crash loses at most 30 s of edits; a newer swap file triggers a recover prompt on the next start.
+- **Status log**: every status message is both shown in the status bar and persisted to `~/.config/hed/log/YYYY-MM-DD.log`, giving a durable audit trail via `hed log`.
+- **Mouse support**: SGR mouse reporting (`?1000`) is enabled alongside bracketed paste; clicks move the cursor and the wheel scrolls, with no extra dependency.
+- **Themes**: syntax colours are palette-driven (`catppuccin` | `dark` | `light`), selected by the `theme` config setting.

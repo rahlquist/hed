@@ -42,10 +42,10 @@ graph TB
 
 | Region | Rows | Description |
 |---|---|---|
-| **Title bar** | 1 | Filename, dirty flag `[+]`, read-only flag, cursor position `Ln X/Y Col Z`, language name, spell status, mark status |
+| **Title bar** | 1 | Filename, dirty flag `[+]`, read-only flag, cursor position `Ln X/Y Col Z`, language name, spell status, mark status. Long filenames are truncated with a leading `…` marker. In read-only mode the whole row is drawn as a solid **red bar** (white on red). |
 | **Text area** | `rows - 2 - helpRows` | Line-number gutter (auto-width, min 3 chars + space) + file content. `~` marks lines past end of file. `>` at right edge indicates truncated lines. |
-| **Status bar** | 1 | Active prompt (bold) or message (yellow, 8-second timeout) |
-| **Help bar** | 0 or 2 | Two rows of key bindings. Hidden entirely if terminal has fewer than 12 rows. In pipe mode, `^X Exit` becomes `^X Done` and `^Q Abort` appears. |
+| **Status bar** | 1 | Active prompt (bold) or message (yellow, 8-second timeout). The right side **always** shows the cursor position `Ln X, Col Y` (plus undo/redo depth `U n R n` when no prompt is active), even while a message is displayed. |
+| **Help bar** | 0 or 2 | Two rows of key bindings. Hidden entirely if terminal has fewer than 12 rows. In pipe mode, `^X Exit` becomes `^X Done` and `^Q Abort` appears. On narrow terminals, labels are truncated with an ellipsis (a label is dropped entirely if it cannot fit). |
 
 ---
 
@@ -67,10 +67,10 @@ Key notation: `^X` = Ctrl+X, `M-X` = Alt+X (or Esc then X), `^\` = Ctrl+Backslas
 
 | Key | Action |
 |---|---|
-| `^W` or `^F` | Live search. As you type, the first match is highlighted. `Up`/`Down` or `^N`/`^P` inside the prompt cycle through matches. `Enter` confirms, `Esc`/`^C`/`^Q`/`^G` cancels. |
+| `^W` or `^F` | Live search. As you type, the first match is highlighted and the status bar shows a `match X of Y` counter. `Up`/`Down` or `^N`/`^P` inside the prompt cycle through matches. `Enter` confirms (the counter stays visible), `Esc`/`^C`/`^Q`/`^G` cancels. |
 | `^N` or `F3` | Jump to next match of last search |
 | `^P` | Jump to previous match of last search |
-| `^R` or `^\` | Replace. Prompts for search text, then replacement. At each match: `Y` yes, `N` no, `A` all, `Esc` cancel. |
+| `^R` or `^\\` | Replace. Prompts for search text, then replacement. At each match the prompt shows `(X of Y)` (which occurrence) plus a context snippet — `ln N: "…pre [MATCH] post…"` — then `Y` yes, `N` no, `A` all, `Esc` cancel. |
 
 **Smart-case search:** if the search string is all lowercase, matching is case-insensitive. If it contains any uppercase, matching is case-sensitive.
 
@@ -102,14 +102,14 @@ Key notation: `^X` = Ctrl+X, `M-X` = Alt+X (or Esc then X), `^\` = Ctrl+Backslas
 | `^^` (Ctrl+6) or `M-A` | Set/clear mark. When mark is set, moving the cursor creates a selection. |
 | `Tab` | Insert indentation at cursor. If selection spans multiple lines, indent all lines. |
 | `Shift+Tab` | Remove one level of indentation from current line or all selected lines |
-| `^Z` or `M-U` | Undo |
-| `^Y` or `M-E` | Redo |
+| `^Z` or `M-U` | Undo. The status bar reports the remaining undo depth, e.g. `Undo (3)`. |
+| `^Y` or `M-E` | Redo. The status bar reports the remaining redo depth, e.g. `Redo (2)`. |
 | `^D` or `Delete` | Delete character forward (or join with next line at end) |
 | `Backspace` or `^H` | Delete character backward (or join with previous line at start). When on whitespace-only prefix, removes up to the previous indent boundary. |
 | `M-Up` | Move current line up |
 | `M-Down` | Move current line down |
 | `M-D` | Duplicate current line |
-| `M-3` or `M-#` | Toggle comment on current line or selection. Uses language-appropriate comment style. |
+| `M-3` or `M-#` | Toggle comment on current line or selection. Uses language-appropriate comment style. The status bar reports the affected range, e.g. `Commented lines 3-5` / `Uncommented lines 3-5`. |
 | `Esc` | Clear mark, search highlight, and status message |
 | Mouse | Click moves the cursor; scroll wheel scrolls. The status bar always shows `Ln X, Col Y` plus undo/redo depth. |
 
@@ -140,7 +140,7 @@ Key notation: `^X` = Ctrl+X, `M-X` = Alt+X (or Esc then X), `^\` = Ctrl+Backslas
 
 ### 3.7 Help Bar (bottom of screen)
 
-The help bar shows two rows of the most common bindings. It is hidden when the terminal has fewer than 12 rows.
+The help bar shows two rows of the most common bindings. It is hidden when the terminal has fewer than 12 rows. On narrow terminals, labels are truncated with an ellipsis (`…`); a label is dropped entirely if it cannot fit in its slot.
 
 **Row 1:** `^G Help` · `^S Save` · `^W Find` · `^R Replace` · `^K Cut` · `^Z Undo` · `^_ Go To` · `^T Spell`
 
@@ -232,7 +232,7 @@ hed [FILE] [+LINE[:COL]] [options]
 | `FILE` | File to open. If omitted and stdin is not a terminal, enters pipe mode. |
 | `+LINE` | Open at line `LINE`. Negative values count from end of file. |
 | `+LINE:COL` | Open at line `LINE`, column `COL`. |
-| `-l`, `--lang LANG` | Force language for syntax highlighting (overrides auto-detection). See `hed langs` for valid values. |
+| `-l`, `--lang LANG` | Force language for syntax highlighting (overrides auto-detection). See `hed langs` (or `hed langs --help`) for valid values. |
 | `-T`, `--tabsize N` | Tab display width (default: 4). |
 | `--tabs` | Indent with tabs (overrides auto-detection). |
 | `--spaces N` | Indent with `N` spaces (overrides auto-detection). |
@@ -293,8 +293,9 @@ When `--lang` is not specified, the editor detects language from:
 
 ### 7.3 Search & Replace
 
-- **Live search:** Start typing in the `^W` prompt — matches highlight as you type. Use `Up`/`Down` to cycle without pressing Enter.
+- **Live search:** Start typing in the `^W` prompt — matches highlight as you type. Use `Up`/`Down` to cycle without pressing Enter. The status bar shows a `match X of Y` counter that stays visible after you confirm.
 - **Smart-case:** Search is case-insensitive when your query is all lowercase, case-sensitive when it contains uppercase. No need for a flag.
+- **Replace with context:** Each `^R` prompt shows `(X of Y)` plus a context snippet — `ln N: "…pre [MATCH] post…"` — so you can confirm you are replacing the right occurrence.
 - **Replace all:** In the `^R` replace prompt, press `A` at any match to auto-replace all remaining occurrences.
 - **Search wraps:** If no match is found forward, the search wraps to the beginning of the file (and vice versa). The status bar shows `Search wrapped`.
 
@@ -314,8 +315,9 @@ When `--lang` is not specified, the editor detects language from:
 
 ### 7.6 Undo/Redo
 
-- **Undo:** `^Z` or `M-U`. Consecutive edits on the same line within 1.5 seconds are grouped into a single undo step.
-- **Redo:** `^Y` or `M-E`. Any new edit clears the redo stack.
+- **Undo:** `^Z` or `M-U`. Consecutive edits on the same line within 1.5 seconds are grouped into a single undo step. The status bar reports the remaining depth, e.g. `Undo (3)`.
+- **Redo:** `^Y` or `M-E`. Any new edit clears the redo stack. The status bar reports the remaining depth, e.g. `Redo (2)`.
+- **Depth indicator:** when no prompt is active, the status bar's right side shows `U n R n` (remaining undo/redo steps).
 - **Undo restores cursor position:** Each snapshot stores the full buffer state, cursor position, and version number.
 
 ### 7.7 Prompt Behavior
@@ -392,9 +394,9 @@ Press `^G` or `F1` inside the editor to see the built-in help screen. It summari
 
 ---
 
-## 8. Configuration, status log & crash recovery
+## 10. Configuration, status log & crash recovery
 
-### 8.1 Configuration file
+### 10.1 Configuration file
 
 Editor settings live in `~/.config/hed/config` (or `$XDG_CONFIG_HOME/hed/config`), an INI-style file with an `[editor]` section:
 
@@ -419,7 +421,7 @@ hed config set theme dark   # set and save
 
 Precedence (highest first): **command-line flags > `HED_*` environment variables > config file > defaults**. The environment variables are `HED_TABSIZE`, `HED_INDENT`, `HED_SPACES`, `HED_SPELL`, `HED_NUMBERS`, `HED_THEME`, and `HED_LOG_SIZE`.
 
-### 8.2 Status message log
+### 10.2 Status message log
 
 Every status message is appended to `~/.config/hed/log/YYYY-MM-DD.log` (one file per day) and kept in an in-memory ring buffer sized by `log_size`. Show the last N messages with:
 
@@ -429,6 +431,19 @@ hed log 10       # last 10
 hed log -n 5     # same
 ```
 
-### 8.3 Crash recovery (swap files)
+### 10.3 Crash recovery (swap files)
 
 While editing a named file, hed keeps a swap file at `~/.config/hed/swap/FILENAME.swp`. The buffer is flushed to it every ~30 seconds while dirty, so a crash (kill, power loss, terminal close) loses at most 30 seconds of edits. On the next start, if the swap file is newer than the original file, hed shows **"Swap file found, press R to recover"** — press `R` to restore the swap content, or any other key to discard it. The swap file is removed on a clean exit.
+
+### 10.4 Shell completions
+
+`make install` installs tab-completion for **bash**, **fish**, and **zsh**. Completions cover all commands, their options, the language identifiers, and the theme values (`catppuccin`, `dark`, `light`). The zsh completion also completes `config get`/`set` keys and `--lang`/`--theme` values.
+
+### 10.5 Missing-terminal error
+
+If the editor is launched without a usable terminal (e.g. from a script or agent with no TTY), hed prints a clear message and exits 2, pointing you to the one-shot commands instead:
+
+```
+hed: interactive editor needs a terminal (/dev/tty unavailable).
+Use a one-shot command instead, e.g.:  hed write FILE ...  |  hed show FILE  |  hed replace FILE OLD NEW
+```

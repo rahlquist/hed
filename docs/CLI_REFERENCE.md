@@ -789,7 +789,7 @@ hed langs
 hed languages
 ```
 
-Lists all supported language identifiers for syntax highlighting and the `--lang` option. Prints a table with language names, aliases, and file extensions.
+Lists all supported language identifiers for syntax highlighting and the `--lang` option. Prints a table with language names, aliases, and file extensions. `hed langs --help` prints a compact one-line list of the language names.
 
 #### Supported languages
 
@@ -823,7 +823,7 @@ hed edit [FILE] [+LINE[:COL]] [options]
 hed e [FILE] [+LINE[:COL]] [options]
 ```
 
-Opens a full-screen nano-style editor on FILE (or stdin). Provides syntax highlighting, live search, replace, undo/redo, mark/cut/paste, comment toggling, and spell checking.
+Opens a full-screen nano-style editor on FILE (or stdin). Provides syntax highlighting, live search, replace, undo/redo, mark/cut/paste, comment toggling, spell checking, **mouse support**, and **crash recovery**. Editor settings (tab size, indent, spell, line numbers, syntax theme, log size) are read from `~/.config/hed/config` (see [config](#config)); three syntax themes are available: `catppuccin`, `dark`, and `light`.
 
 When no command name is given, `hed FILE` opens the editor. This is the default action when the first argument is not a recognized command.
 
@@ -879,6 +879,32 @@ When no command name is given, `hed FILE` opens the editor. This is the default 
 | `M-3` | Toggle comment |
 | `^Q` | Quit pipe mode (abort, exit 1) |
 | `^G` | Help (inside editor) |
+| Mouse | Click moves the cursor; scroll wheel scrolls |
+
+#### Editor feedback
+
+- **Search match counter:** live search shows `match X of Y` in the status bar, updated as you type and kept after confirming.
+- **Replace improvements:** each replace prompt shows `(X of Y)` (which occurrence) plus a context snippet — `ln N: "…pre [MATCH] post…"` — so you can confirm you are replacing the right text.
+- **Undo/redo feedback:** the status bar shows remaining undo/redo depth (`U n R n`) whenever no prompt is active.
+- **Comment toggle feedback:** toggling comments reports the affected range, e.g. `Commented lines 3-5` / `Uncommented lines 3-5`.
+- **Permanent position:** the status bar always shows `Ln X, Col Y` on the right, even when a message is displayed.
+- **Read-only red bar:** in read-only mode the entire title row is drawn as a solid red bar (white on red).
+- **Title bar ellipsis:** long filenames are truncated with a leading `…` marker to fit the terminal width.
+- **Help bar ellipsis:** on narrow terminals, help-bar labels are truncated with an ellipsis (a label is dropped entirely if it cannot fit).
+- **Spell suggestions:** the spell walk offers up to **6** suggestions per misspelling (keys `1`–`6`).
+
+#### Crash recovery (swap files)
+
+While editing a named file, hed keeps a swap file at `~/.config/hed/swap/FILENAME.swp`, flushed every ~30 seconds while the buffer is dirty. If hed is killed (crash, power loss, terminal close), at most 30 seconds of edits are lost. On the next start, if the swap file is newer than the original file, hed shows **"Swap file found, press R to recover"** — press `R` to restore, any other key to discard. The swap file is removed on a clean exit.
+
+#### Missing-terminal error
+
+If the editor is launched without a usable terminal (e.g. from a script or agent with no TTY), hed prints a clear message and exits 2, pointing you to the one-shot commands instead:
+
+```
+hed: interactive editor needs a terminal (/dev/tty unavailable).
+Use a one-shot command instead, e.g.:  hed write FILE ...  |  hed show FILE  |  hed replace FILE OLD NEW
+```
 
 #### Pipe mode
 
@@ -951,6 +977,12 @@ Shows the last N status messages the editor logged to `~/.config/hed/log/YYYY-MM
 
 ---
 
+## Shell completions
+
+`make install` installs tab-completion for **bash**, **fish**, and **zsh** (installed to the system completion directories). Completions cover all commands (`write`, `show`, `search`, `replace`, `insert`, `delete`, `spell`, `langs`, `config`, `log`, `edit`, `help`), their options, the language identifiers, and the theme values (`catppuccin`, `dark`, `light`). The zsh completion also completes `config get`/`set` keys and `--lang`/`--theme` values.
+
+---
+
 ## Quick Reference
 
 ```
@@ -977,10 +1009,14 @@ Shows the last N status messages the editor logged to `~/.config/hed/log/YYYY-MM
   hed spell [FILE...] [-l LANG] [-a] [-k N] [-w] [--add WORD] [--json] [-q]
 
 # List languages
-  hed langs
+  hed langs [--help]
+
+# Editor config & status log
+  hed config [get KEY | set KEY VALUE]
+  hed log [N]
 
 # Interactive editor
-  hed [FILE] [+LINE[:COL]] [-l LANG] [-T N] [--tabs | --spaces N] [-R]
+  hed [FILE] [+LINE[:COL]] [-l LANG] [-T N] [--tabs | --spaces N] [-R] [--log-size N]
 ```
 
 ## Summary of exit codes
