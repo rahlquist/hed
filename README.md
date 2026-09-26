@@ -135,21 +135,29 @@ hed /etc/hosts -R
 
 ## Editor keys
 
+### Most common keys (quick reference)
+
+`^S` save · `^X` exit · `^W` search · `^G` help · `^Z`/`^Y` undo/redo · `^K`/`^U` cut/paste · `^R` replace · `^T` spell · `^O` save as · `^Q` quit/abort
+
+Mouse: **click** moves the cursor, **scroll wheel** scrolls. The status bar always shows `Ln X, Col Y` plus undo/redo depth.
+
 | Key | Action | Key | Action |
 |-----|--------|-----|--------|
 | `^S` | Save | `^O` | Save as |
 | `^X` | Exit (prompts to save) | `^Q` | Quit / abort |
 | `^W` / `^F` | Live search (smart-case) | `^N` / `^P` | Next / previous match |
-| `^R` or `^\` | Replace (y/n/all) | `^_` / `^L` | Go to line[:col] |
+| `^R` or `^\\` | Replace (y/n/a) | `^_` / `^L` | Go to line[:col] |
 | `^K` | Cut line (repeat to collect) or selection | `^U` | Paste |
 | `^^` or `M-A` | Set mark (select) | `M-6` | Copy |
 | `^Z` / `^Y` | Undo / redo | `M-3` | Toggle comment |
 | `M-Up` / `M-Down` | Move line | `M-D` | Duplicate line |
-| `^T` or `F7` | Spell walk (1–9 pick, `a` add, `i` ignore, `e` edit) | `M-S` | Toggle spell underline |
+| `^T` or `F7` | Spell walk (1–6 pick, `a` add, `i` ignore, `e` edit) | `M-S` | Toggle spell underline |
 | `Tab` / `Shift-Tab` | Indent / outdent (selection too) | `M-N` | Toggle line numbers |
-| `^G` / `F1` | Help | `^C` | Position info |
+| `^G` / `F1` | Help | Mouse | Click moves cursor, wheel scrolls |
 
-**Also:** auto-indent (language-aware extra indent after `:`, `{`, `then`, `function`…), smart Home, bracketed paste, UTF-8/wide characters, CRLF preservation, indentation style detection, and `+LINE:COL` on the command line.
+**Also:** auto-indent (language-aware extra indent after `:`, `{`, `then`, `function`…), smart Home, bracketed paste, UTF-8/wide characters, CRLF preservation, indentation style detection, `+LINE:COL` on the command line, and crash recovery via swap files (`~/.config/hed/swap/`).
+
+**Configuration:** editor settings (tab size, indent style, spell, line numbers, syntax theme, log size) live in `~/.config/hed/config` — view or edit them with `hed config`. Status messages are logged to `~/.config/hed/log/` and shown with `hed log`.
 
 ---
 

@@ -918,6 +918,39 @@ git diff | hed | grep '^[+-]'
 
 ---
 
+### config
+
+```
+hed config
+hed config get KEY
+hed config set KEY VALUE
+```
+
+Views or edits the editor configuration file `~/.config/hed/config` (or `$XDG_CONFIG_HOME/hed/config`), an INI-style file with an `[editor]` section. With no arguments it prints the file path and the effective settings; `get KEY` prints one setting; `set KEY VALUE` validates, saves, and confirms.
+
+| Setting | Values | Meaning |
+|---------|--------|---------|
+| `tabsize` | 1–32 | Tab display width |
+| `indent` | `auto` \| `tabs` \| `spaces` | Indent style |
+| `spaces` | 1–16 | Indent width when `indent = spaces` |
+| `spell` | `true` \| `false` | Start with misspelling underlining on |
+| `numbers` | `true` \| `false` | Show the line-number gutter |
+| `theme` | `catppuccin` \| `dark` \| `light` | Syntax colour palette |
+| `log_size` | 0+ | Status messages kept in memory (0 = unlimited) |
+
+Precedence: **command-line flags > `HED_*` environment variables > config file > defaults**. The environment variables are `HED_TABSIZE`, `HED_INDENT`, `HED_SPACES`, `HED_SPELL`, `HED_NUMBERS`, `HED_THEME`, and `HED_LOG_SIZE`.
+
+### log
+
+```
+hed log [N]
+hed log -n N
+```
+
+Shows the last N status messages the editor logged to `~/.config/hed/log/YYYY-MM-DD.log` (one file per day). Default N = 50.
+
+---
+
 ## Quick Reference
 
 ```

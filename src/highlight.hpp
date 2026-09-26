@@ -29,6 +29,7 @@ bool langFromName(const std::string& name, LangId& out);
 LangId detectLang(const std::string& path, const std::string& content);
 std::string langTable();
 void highlightLine(LangId id, const std::string& line, HlState& st, std::vector<uint8_t>& hl);
+void setTheme(const std::string& name);  // "catppuccin" (default) | "dark" | "light"; unknown -> catppuccin
 const char* hlSgr(uint8_t h);
 bool spellRegion(LangId id, uint8_t h);
 CommentStyle commentStyle(LangId id);

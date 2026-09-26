@@ -22,6 +22,7 @@ bool readFd(int fd, std::string& out);
 bool writeAll(int fd, const std::string& data);
 bool pathExists(const std::string& p);
 bool isDir(const std::string& p);
+long fileMtime(const std::string& p);  // mtime in nanoseconds since epoch, -1 if missing
 bool atomicWrite(const std::string& path, const std::string& data, std::string& err, int forceMode = -1);
 bool appendToFile(const std::string& path, const std::string& data, std::string& err, int forceMode = -1);
 bool makeBackup(const std::string& path, std::string& backupPath, std::string& err);

@@ -15,6 +15,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
+#include <deque>
 #include <functional>
 #include <string>
 #include <vector>
@@ -30,9 +32,10 @@ enum Key {
     K_LEFT = 1000, K_RIGHT, K_UP, K_DOWN, K_HOME, K_END, K_PGUP, K_PGDN, K_DEL, K_INS,
     K_CLEFT, K_CRIGHT, K_CUP, K_CDOWN, K_CHOME, K_CEND, K_AUP, K_ADOWN, K_STAB,
     K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10, K_F11, K_F12,
-    K_PASTE, K_RESIZE, K_EOF, K_NONE,
+        K_PASTE, K_RESIZE, K_EOF, K_NONE,
+        K_MLCLICK = 1100, K_MWHEELUP, K_MWHEELDOWN,  // SGR mouse events
     K_ALT = 0x100000
-};
+    };
 constexpr int CK(int k) { return k & 0x1f; }
 
 volatile sig_atomic_t g_winch = 0;
@@ -42,7 +45,7 @@ bool g_raw = false;
 
 void restoreTerm() {
     if (!g_raw) return;
-    const char* s = "\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l";
+    const char* s = "\x1b[?2004l\x1b[?1000l\x1b[?1006l\x1b[0m\x1b[?25h\x1b[?1049l";
     if (write(g_ttyFd, s, strlen(s)) < 0) {}
     tcsetattr(g_ttyFd, TCSAFLUSH, &g_orig);
     g_raw = false;
@@ -97,6 +100,17 @@ class Editor {
     int exitCode = 0;
     Speller* sp = nullptr;
 
+    // ---- status message log (ring buffer + disk log)
+    std::deque<std::string> msgLog;
+    size_t maxLog = 100;   // 0 = unlimited
+    // ---- search match counter
+    size_t matchTotal = 0, matchIdx = 0;
+    // ---- mouse state (SGR coordinates, 1-based, set while parsing)
+    int mouseCol = 0, mouseRow = 0;
+    // ---- swap file / crash recovery
+    std::string swapPath;
+    Clock::time_point lastSwapWrite;
+
     // ---- geometry
     size_t helpRows() const { return rows >= 12 ? 2 : 0; }
     size_t textRows() const {
@@ -115,7 +129,36 @@ class Editor {
     }
     bool dirty() const { return ver != savedVer; }
 
-    void setMsg(const std::string& m) { msg = m; msgTime = Clock::now(); }
+    // Record a status message: show it in the status bar, keep it in the
+    // in-memory ring buffer (capped by maxLog / config log_size), and append
+    // it to ~/.config/hed/log/YYYY-MM-DD.log so `hed log` can show it later.
+    void setMsg(const std::string& m) {
+        msg = m;
+        msgTime = Clock::now();
+        if (maxLog != 0) {
+            msgLog.push_back(m);
+            while (msgLog.size() > maxLog) msgLog.pop_front();
+        }
+        appendStatusLog(m);
+    }
+    void appendStatusLog(const std::string& m) {
+        static bool dirReady = false;
+        std::string dir = configDir() + "/log";
+        if (!dirReady) {
+            std::string err;
+            if (!mkdirParents(dir, err)) return;  // can't log; stay silent
+            dirReady = true;
+        }
+        char ts[64];
+        time_t now = time(nullptr);
+        struct tm tmv;
+        localtime_r(&now, &tmv);
+        strftime(ts, sizeof ts, "%Y-%m-%d", &tmv);
+        char hm[32];
+        strftime(hm, sizeof hm, "%H:%M:%S", &tmv);
+        std::string err;
+        appendToFile(dir + "/" + ts + ".log", std::string("[") + hm + "] " + m + "\n", err);
+    }
 
     // ---- terminal
     void updateSize() {
@@ -139,8 +182,10 @@ class Editor {
         raw.c_cc[VTIME] = 0;
         if (tcsetattr(inFd, TCSAFLUSH, &raw) != 0) return false;
         g_raw = true;
-        writeAll(outFd, "\x1b[?1049h\x1b[?2004h\x1b[H\x1b[2J");
-        return true;
+                // Enable mouse reporting: ?1000 = press/release + scroll wheel,
+                // ?1006 = SGR encoding (ESC [ < b ; c ; r M/m) so we get exact coords.
+        writeAll(outFd, "\x1b[?1049h\x1b[?2004h\x1b[?1000h\x1b[?1006h\x1b[H\x1b[2J");
+                return true;
     }
     int readByteTimeout(int ms) {
         struct pollfd p {inFd, POLLIN, 0};
@@ -187,16 +232,36 @@ class Editor {
             default: return K_NONE;
         }
     }
-    int readKey() {
+    // Read one key. idleMs >= 0 makes the initial poll time out after that many
+    // milliseconds, returning K_NONE (used by the main loop to flush the swap
+    // file periodically while the buffer is dirty). idleMs < 0 blocks forever.
+    // Parse an SGR mouse sequence: ESC [ < btn ; col ; row M/m.
+    // btn: 0 = left press, 64 = wheel up, 65 = wheel down (motion adds 32).
+    // Coordinates are 1-based and stored in mouseCol/mouseRow for process().
+    int parseMouse(const std::string& seq) {
+        std::string params = seq.substr(1, seq.size() - 2);  // strip '<' and final byte
+        auto ps = splitSimple(params, ';');
+        if (ps.size() < 3) return K_NONE;
+        int btn = atoi(ps[0].c_str());
+        mouseCol = atoi(ps[1].c_str());
+        mouseRow = atoi(ps[2].c_str());
+        bool press = seq.back() == 'M';
+        if (!press) return K_NONE;  // only act on press events
+        if (btn & 64) return (btn & 3) == 0 ? K_MWHEELUP : K_MWHEELDOWN;
+        if ((btn & 3) == 0) return K_MLCLICK;  // left button
+        return K_NONE;
+    }
+    int readKey(int idleMs = -1) {
         unsigned char c;
         for (;;) {
             if (g_winch) { g_winch = 0; return K_RESIZE; }
             struct pollfd p {inFd, POLLIN, 0};
-            int r = poll(&p, 1, -1);
+            int r = poll(&p, 1, idleMs);
             if (r < 0) {
                 if (errno == EINTR) continue;
                 return K_EOF;
             }
+            if (r == 0) return K_NONE;  // idle timeout
             ssize_t n = read(inFd, &c, 1);
             if (n == 1) break;
             if (n == 0) return K_EOF;
@@ -214,7 +279,8 @@ class Editor {
                 if (ch >= 0x40 && ch <= 0x7e) break;
                 if (seq.size() > 16) return K_NONE;
             }
-            if (seq == "M" || seq[0] == '<') return K_NONE;  // mouse: ignore
+            if (seq == "M") return K_NONE;  // legacy X10 mouse: ignore
+            if (seq[0] == '<') return parseMouse(seq);  // SGR mouse
             return parseCSI(seq);
         }
         if (c1 == 'O') {
@@ -388,32 +454,55 @@ class Editor {
     }
     void drawTitle(std::string& ab) {
         std::string name = filename.empty() ? (opt.pipeMode ? "[pipe]" : "[New Buffer]") : filename;
-        std::string left = " hed  " + name + (dirty() ? " [+]" : "") + (readOnly ? " [read-only]" : "");
+        std::string left = " hed  " + name;
+        std::string suffix = std::string(dirty() ? " [+]" : "") + (readOnly ? " [read-only]" : "");
         char right[160];
         snprintf(right, sizeof right, "Ln %zu/%zu Col %zu  %s%s%s ", cy + 1, L.size(), rxOf(L[cy], cx) + 1, langName(lang),
                  spellOn ? "  spell" : "", markOn ? "  MARK" : "");
         std::string r = right;
-        size_t lw = displayWidth(left), rw = r.size();
-        if (lw + rw + 1 > cols) {
-            if (rw + 10 < cols) {
-                while (displayWidth(left) + rw + 1 > cols && left.size() > 4) left.erase(u8prev(left, left.size()));
+        size_t lw = displayWidth(left), rw = displayWidth(r), sw = displayWidth(suffix);
+        bool cut = false;
+        if (lw + sw + rw + 1 > cols) {
+            if (rw + sw + 8 < cols) {
+                // Shrink the filename, leaving room for a leading ellipsis marker.
+                while (displayWidth(left) + sw + rw + 2 > cols && left.size() > 5) { left.erase(u8prev(left, left.size())); cut = true; }
+                if (cut) left += "\xe2\x80\xa6";  // …
             } else { r.clear(); rw = 0; }
             lw = displayWidth(left);
         }
-        ab += "\x1b[1;1H\x1b[0;7m" + left;
-        if (lw + rw < cols) ab += std::string(cols - lw - rw, ' ');
+        std::string title = left + suffix;
+        size_t tw = displayWidth(title);
+        // Read-only: draw the whole title row as a solid red bar (white on red).
+        ab += "\x1b[1;1H" + std::string(readOnly ? "\x1b[1;37;41m" : "\x1b[0;7m") + title;
+        if (tw + rw < cols) ab += std::string(cols - tw - rw, ' ');
         ab += r + "\x1b[0m";
     }
     void drawBottom(std::string& ab) {
         size_t row = textRows() + 2;
         ab += "\x1b[" + std::to_string(row) + ";1H\x1b[0m\x1b[K";
+        // Permanent position + undo/redo indicator on the right of the status row.
+        std::string right = "Ln " + std::to_string(cy + 1) + ", Col " + std::to_string(rxOf(L[cy], cx) + 1);
+        if (!promptOn) right += "  U" + std::to_string(undoS.size()) + " R" + std::to_string(redoS.size());
+        size_t rightW = displayWidth(right) + 1;  // + leading space
         std::string m;
         if (promptOn) m = promptStr;
         else if (!msg.empty() && Clock::now() - msgTime < std::chrono::seconds(8)) m = msg;
         if (!m.empty()) {
-            while (displayWidth(m) > cols - 1) m.erase(0, u8next(m, 0));
+            size_t maxW = cols > rightW + 1 ? cols - 1 - rightW : 0;
+            if (displayWidth(m) > maxW) {
+                if (promptOn) {
+                    // Prompts: keep the trailing action hints, drop the front.
+                    while (displayWidth(m) > maxW) m.erase(0, u8next(m, 0));
+                } else {
+                    // Messages: keep the beginning, mark truncation with an ellipsis.
+                    bool cut = false;
+                    while (displayWidth(m) > maxW - 1 && !m.empty()) { m.erase(u8prev(m, m.size())); cut = true; }
+                    if (cut) m += "\xe2\x80\xa6";  // …
+                }
+            }
             ab += promptOn ? "\x1b[1m" + m + "\x1b[0m" : "\x1b[38;5;229m" + m + "\x1b[0m";
         }
+        ab += "\x1b[" + std::to_string(row) + ";" + std::to_string(cols - rightW + 1) + "H\x1b[38;5;240m" + right + "\x1b[0m";
         if (!helpRows()) return;
         static const char* h1[][2] = {{"^G", "Help"}, {"^S", "Save"}, {"^W", "Find"}, {"^R", "Replace"},
                                       {"^K", "Cut"}, {"^Z", "Undo"}, {"^_", "Go To"}, {"^T", "Spell"}};
@@ -424,12 +513,20 @@ class Editor {
         auto line = [&](const char* items[][2], size_t r) {
             ab += "\x1b[" + std::to_string(r) + ";1H\x1b[0m\x1b[K";
             size_t slot = cols / 8, used = 0;
-            for (int k = 0; k < 8 && slot >= 6; k++) {
+            for (int k = 0; k < 8 && slot >= 4; k++) {
                 std::string key = items[k][0], lab = items[k][1];
-                std::string cell = key + " " + lab;
-                if (cell.size() > slot - 1) lab = lab.substr(0, slot - 2 - key.size() > 0 ? slot - 2 - key.size() : 0);
+                size_t keyW = displayWidth(key);
+                // A cell needs at least key + space + ellipsis; drop it if too narrow.
+                if (slot < keyW + 3) continue;
+                size_t maxLab = slot - keyW - 2;  // space + at least the ellipsis
+                if (displayWidth(lab) > maxLab) {
+                    // Truncate the label and mark it with an ellipsis.
+                    size_t cut = 0;
+                    while (cut < lab.size() && displayWidth(lab.substr(0, cut)) <= maxLab - 1) cut = u8next(lab, cut);
+                    lab = lab.substr(0, cut) + "\xe2\x80\xa6";  // …
+                }
                 ab += "\x1b[7m" + key + "\x1b[0m " + lab;
-                used = key.size() + 1 + lab.size();
+                used = keyW + 1 + displayWidth(lab);
                 if (used < slot) ab += std::string(slot - used, ' ');
             }
         };
@@ -532,7 +629,7 @@ class Editor {
         L = std::move(s.L); cx = s.cx; cy = s.cy; ver = s.ver;
         lastKind = 0; markOn = false; matchOn = false;
         clampCursor(); invalidate(0); center(cy);
-        setMsg("Undo");
+        setMsg("Undo (" + std::to_string(undoS.size()) + ")");  // remaining undo depth
     }
     void doRedo() {
         if (redoS.empty()) { setMsg("Nothing to redo"); return; }
@@ -542,7 +639,7 @@ class Editor {
         L = std::move(s.L); cx = s.cx; cy = s.cy; ver = s.ver;
         lastKind = 0; markOn = false; matchOn = false;
         clampCursor(); invalidate(0); center(cy);
-        setMsg("Redo");
+        setMsg("Redo (" + std::to_string(redoS.size()) + ")");  // remaining redo depth
     }
     bool editable() {
         if (readOnly) { setMsg("Read-only buffer (opened with --readonly)"); return false; }
@@ -791,7 +888,10 @@ class Editor {
         }
         clampCursor();
         modified(a);
-        setMsg(all ? "Uncommented" : "Commented");
+        size_t counted = 0;
+        for (size_t y = a; y <= b; y++) if (!trimRight(L[y]).empty()) counted++;
+        setMsg(std::string(all ? "Uncommented" : "Commented") + " lines " + std::to_string(a + 1) + "-" +
+               std::to_string(b + 1) + " (" + std::to_string(counted) + " lines)");
     }
     void moveLine(int dir) {
         if (!editable()) return;
@@ -901,6 +1001,43 @@ class Editor {
         matchOn = true; matchY = y; matchX = x; matchLen = len;
         center(y);
     }
+    // Count every occurrence of q across the whole buffer (overlapping matches
+    // count, matching how the live search walks the text).
+    size_t countMatches(const std::string& q, bool icase) const {
+        std::string nq = icase ? toLower(q) : q;
+        if (nq.empty()) return 0;
+        size_t total = 0;
+        for (auto& s : L) {
+            std::string h = icase ? toLower(s) : s;
+            size_t p = 0;
+            while ((p = h.find(nq, p)) != std::string::npos) { total++; p++; }
+        }
+        return total;
+    }
+    // 1-based index of the match at (y, x) in line-major order.
+    size_t matchIndex(size_t y, size_t x, const std::string& q, bool icase) const {
+        std::string nq = icase ? toLower(q) : q;
+        size_t idx = 0;
+        for (size_t i = 0; i <= y && i < L.size(); i++) {
+            std::string h = icase ? toLower(L[i]) : L[i];
+            size_t p = 0;
+            while ((p = h.find(nq, p)) != std::string::npos) {
+                if (i < y || p <= x) idx++;
+                else break;
+                p++;
+            }
+            if (i == y) break;
+        }
+        return idx;
+    }
+    // Status message "match X of Y" for the match at (y, x); stores the total.
+    void setMatchMsg(size_t y, size_t x, const std::string& q, bool wrapped) {
+        bool icase = !hasUpper(q);
+        matchTotal = countMatches(q, icase);
+        matchIdx = matchIndex(y, x, q, icase);
+        setMsg("match " + std::to_string(matchIdx) + " of " + std::to_string(matchTotal) +
+               (wrapped ? " (wrapped)" : ""));
+    }
     void find() {
         size_t oy = cy, ox = cx, orow = rowoff, ocol = coloff;
         std::string buf;
@@ -916,7 +1053,7 @@ class Editor {
                 size_t sy = matchOn ? matchY : cy, sx = matchOn ? matchX : cx;
                 ok = fwd ? searchFrom(q, sy, sx + 1, true, fy, fx, w) : searchFrom(q, sy, sx, false, fy, fx, w);
             }
-            if (ok) { jumpMatch(fy, fx, q.size()); setMsg(w ? "Search wrapped" : ""); }
+            if (ok) { jumpMatch(fy, fx, q.size()); setMatchMsg(fy, fx, q, w); }
             else { matchOn = false; cy = oy; cx = ox; setMsg("Not found: " + q); }
         };
         if (!prompt(label, buf, cb)) {
@@ -933,14 +1070,42 @@ class Editor {
             if (searchFrom(lastSearch, oy, buf.empty() ? ox + 1 : ox, true, fy, fx, w)) jumpMatch(fy, fx, lastSearch.size());
             else setMsg("\"" + lastSearch + "\" not found");
         }
+        if (matchOn) setMatchMsg(matchY, matchX, lastSearch, false);  // keep "match X of Y" after Enter
     }
     void findNext(bool fwd) {
         if (lastSearch.empty()) { find(); return; }
         size_t fy, fx;
         bool w;
         bool ok = fwd ? searchFrom(lastSearch, cy, cx + 1, true, fy, fx, w) : searchFrom(lastSearch, cy, cx, false, fy, fx, w);
-        if (ok) { jumpMatch(fy, fx, lastSearch.size()); setMsg(w ? "Search wrapped" : ""); }
+        if (ok) { jumpMatch(fy, fx, lastSearch.size()); setMatchMsg(fy, fx, lastSearch, w); }
         else setMsg("\"" + lastSearch + "\" not found");
+    }
+    // Build a short context snippet around the match at (y, x) for the replace
+    // confirmation prompt, e.g.  "ln 5:  ...pre [MATCH] post..."
+    std::string matchContext(size_t y, size_t x, size_t len) const {
+        const std::string& s = L[y];
+        size_t xs = std::min(x, s.size());
+        std::string pre = s.substr(0, xs);
+        std::string hit = s.substr(xs, std::min(len, s.size() - xs));
+        std::string post = s.substr(std::min(xs + len, s.size()));
+        const size_t maxPre = 14, maxPost = 12, maxHit = 24;
+        std::string out;
+        if (displayWidth(pre) > maxPre) {
+            while (displayWidth(pre) > maxPre) pre.erase(0, u8next(pre, 0));
+            out = "\xe2\x80\xa6" + pre;  // …
+        } else out = pre;
+        if (displayWidth(hit) > maxHit) {
+            size_t c = 0;
+            while (c < hit.size() && displayWidth(hit.substr(0, c)) <= maxHit - 1) c = u8next(hit, c);
+            hit = hit.substr(0, c) + "\xe2\x80\xa6";
+        }
+        out += "[" + hit + "]";
+        if (displayWidth(post) > maxPost) {
+            size_t c = 0;
+            while (c < post.size() && displayWidth(post.substr(0, c)) <= maxPost - 1) c = u8next(post, c);
+            out += post.substr(0, c) + "\xe2\x80\xa6";
+        } else out += post;
+        return "ln " + std::to_string(y + 1) + ": \"" + out + "\"";
     }
     void replace() {
         if (!editable()) return;
@@ -953,6 +1118,7 @@ class Editor {
         if (!prompt("Replace \"" + q + "\" with: ", with)) { setMsg("Cancelled"); return; }
         bool icase = !hasUpper(q);
         std::string nq = icase ? toLower(q) : q;
+        size_t total = countMatches(q, icase);
         snapshot(3);
         size_t sy = cy, sx = cx, y = cy, x = cx;
         bool all = false, phase2 = false;
@@ -970,7 +1136,13 @@ class Editor {
             if (phase2 && (fy > sy || (fy == sy && fx >= sx))) break;
             jumpMatch(fy, fx, q.size());
             int k = 'y';
-            if (!all) k = askKey("Replace this instance?   Y Yes   N No   A All   Esc Cancel");
+            if (!all) {
+                size_t idx = matchIndex(fy, fx, q, icase);
+                std::string prompt = "Replace this instance?  (" + std::to_string(idx) + " of " +
+                                     std::to_string(total) + ")  " + matchContext(fy, fx, q.size()) +
+                                     "   Y Yes  N No  A All from here  Esc Cancel";
+                k = askKey(prompt);
+            }
             if (k == 'a' || k == 'A') { all = true; k = 'y'; }
             if (k == 'y' || k == 'Y') {
                 L[fy].replace(fx, q.size(), with);
@@ -1035,7 +1207,7 @@ class Editor {
                 return;
             }
             jumpMatch(fy, m.start, m.len);
-            auto sug = sp->suggest(m.word, 9);
+            auto sug = sp->suggest(m.word, 6);  // show at most 6 suggestions
             std::string q = "\"" + m.word + "\": ";
             for (size_t k = 0; k < sug.size(); k++) q += std::to_string(k + 1) + ":" + sug[k] + "  ";
             if (sug.empty()) q += "(no suggestions)  ";
@@ -1090,11 +1262,12 @@ class Editor {
             "          ^^ (Ctrl+6) or M-A set/clear mark to select, Tab/Shift+Tab indent/outdent",
             "          ^Z undo  ^Y redo (also M-U / M-E), ^D delete, M-D duplicate line",
             "          M-Up/M-Down move line, M-3 toggle comment on line/selection",
-            "SPELL     ^T or F7 walk misspellings: 1-9 pick, a add to dictionary, i ignore, e edit",
+            "SPELL     ^T or F7 walk misspellings: 1-6 pick, a add to dictionary, i ignore, e edit",
             "          M-S toggle misspelling underline (comments/strings in code, all text in prose)",
-            "VIEW      M-N toggle line numbers, ^C show position, Esc clear mark/highlight",
+            "VIEW      M-N toggle line numbers, mouse: click moves cursor, wheel scrolls, Esc clear mark/highlight",
             "",
             "Pipe mode (cmd | hed | cmd2):  ^X finishes and writes the buffer to stdout, ^Q aborts (exit 1).",
+            "Config: ~/.config/hed/config (see `hed config`); status log: `hed log`.",
             "Personal dictionary: ~/.config/hed/words.txt",
             "",
             "Press any key to return.",
@@ -1215,13 +1388,35 @@ class Editor {
             case K_ALT | 'd': dupLine(); break;
             case K_AUP: moveLine(-1); break;
             case K_ADOWN: moveLine(1); break;
-            case CK('c'): {
-                size_t bytes = 0;
-                for (auto& l : L) bytes += l.size() + 1;
-                setMsg("line " + std::to_string(cy + 1) + "/" + std::to_string(L.size()) + " (" +
-                       std::to_string(L.size() ? (cy + 1) * 100 / L.size() : 0) + "%), col " +
-                       std::to_string(rxOf(L[cy], cx) + 1) + ", " + std::to_string(bytes) + " bytes, " +
-                       (useTabs ? "tabs" : std::to_string(indentWidth) + "-space indent") + (crlf ? ", CRLF" : ""));
+            case K_MLCLICK: {
+                // SGR mouse click: move the cursor to the clicked cell. Row 1 is
+                // the title bar, so text rows start at screen row 2; the gutter
+                // occupies the leftmost columns.
+                if (mouseRow >= 2 && mouseRow < (int)(2 + textRows())) {
+                    size_t g = gutterWidth();
+                    int c = mouseCol - 1;  // 0-based screen column
+                    size_t tc = textCols();
+                    if (c >= (int)g && (size_t)c < g + tc) {
+                        size_t y = rowoff + (size_t)(mouseRow - 2);
+                        if (y >= L.size()) y = L.size() - 1;
+                        size_t rx = (size_t)c - g + coloff;
+                        cx = cxOf(L[y], rx);
+                        cy = y;
+                        wantRx = -1;
+                    }
+                }
+                break;
+            }
+            case K_MWHEELUP: {
+                rowoff = rowoff > 3 ? rowoff - 3 : 0;
+                if (cy < rowoff) rowoff = cy;
+                break;
+            }
+            case K_MWHEELDOWN: {
+                size_t tr = textRows();
+                size_t max = L.size() > tr ? L.size() - tr : 0;
+                rowoff = rowoff + 3 < max ? rowoff + 3 : max;
+                if (cy >= rowoff + tr) rowoff = cy - tr + 1;
                 break;
             }
             case CK('a'): case K_HOME: home(); break;
@@ -1260,8 +1455,60 @@ class Editor {
         else cutChain = true;
     }
 
+    // ---- swap file / crash recovery
+    // Write the current buffer to the swap file. Called on start and then every
+    // ~30s while the buffer is dirty, so a crash loses at most 30s of edits.
+    void writeSwapFile() {
+        if (swapPath.empty()) return;
+        Text t;
+        t.lines = L;
+        t.trailingNewline = trailingNl;
+        t.crlf = crlf;
+        std::string err;
+        atomicWrite(swapPath, joinText(t), err);  // best effort; ignore failures
+        lastSwapWrite = Clock::now();
+    }
+    // Called from the main loop on idle timeouts while the buffer is dirty.
+    void maybeSwapSave() {
+        if (swapPath.empty() || !dirty()) return;
+        if (Clock::now() - lastSwapWrite < std::chrono::seconds(30)) return;
+        writeSwapFile();
+    }
+    // Set up the swap file for a named (non-pipe) buffer and decide whether to
+    // offer crash recovery. Returns true if a recoverable swap file exists.
+    bool setupSwap() {
+        if (filename.empty() || opt.pipeMode) return false;
+        std::string sdir = configDir() + "/swap";
+        std::string err;
+        if (!mkdirParents(sdir, err)) return false;
+        swapPath = sdir + "/" + baseName(filename) + ".swp";
+        long origMt = pathExists(filename) ? fileMtime(filename) : -1;
+        long swMt = pathExists(swapPath) ? fileMtime(swapPath) : -1;
+        if (swMt >= 0 && origMt >= 0 && swMt <= origMt) {
+            unlink(swapPath.c_str());  // stale swap (older than the file): discard
+            swMt = -1;
+        }
+        if (swMt >= 0) return true;  // newer swap file -> offer recovery
+        writeSwapFile();             // fresh session: create the swap file now
+        return false;
+    }
+    // Load the swap file's content into the buffer (crash recovery).
+    void recoverFromSwap() {
+        std::string data, err;
+        if (!readFile(swapPath, data, err)) { setMsg("Could not read swap file: " + err); return; }
+        Text t = splitText(data);
+        L = t.lines;
+        trailingNl = t.trailingNewline;
+        crlf = t.crlf;
+        clampCursor();
+        invalidate(0);
+        setMsg("Recovered from swap file (press ^S to save)");
+    }
+
   public:
     int runImpl() {
+        setTheme(opt.theme);   // syntax palette from config / --theme
+        maxLog = opt.logSize;  // status-log ring size (0 = unlimited)
         std::string content;
         bool fromFile = false;
         if (!opt.file.empty() && opt.file != "-") {
@@ -1298,7 +1545,8 @@ class Editor {
         if (!isatty(0) || !isatty(1) || opt.pipeMode) {
             int fd = open("/dev/tty", O_RDWR | O_CLOEXEC);
             if (fd < 0) {
-                fprintf(stderr, "hed: interactive editor needs a terminal (/dev/tty unavailable). Use a one-shot command: hed --help\n");
+                fprintf(stderr, "hed: interactive editor needs a terminal (/dev/tty unavailable).\n"
+                                "Use a one-shot command instead, e.g.:  hed write FILE ...  |  hed show FILE  |  hed replace FILE OLD NEW\n");
                 return 2;
             }
             inFd = outFd = fd;
@@ -1321,11 +1569,26 @@ class Editor {
         if (opt.line != 0) center(cy);
         if (msg.empty()) setMsg("^G help  ^X " + std::string(opt.pipeMode && filename.empty() ? "done (writes to stdout)" : "exit") +
                                 "  ^S save  ^W find  ^T spell");
+        // Crash recovery: if a swap file newer than the original exists, offer
+        // to restore it before the user starts editing.
+        if (setupSwap()) {
+            setMsg("Swap file found, press R to recover, any other key to discard");
+            int k;
+            do { refresh(); k = readKey(); if (k == K_RESIZE) updateSize(); } while (k == K_RESIZE || k == K_NONE);
+            if (k == 'r' || k == 'R') recoverFromSwap();
+            else { unlink(swapPath.c_str()); writeSwapFile(); setMsg("Swap file discarded"); }
+        }
+        refresh();
         while (!quitFlag) {
-            refresh();
-            process(readKey());
+            // While dirty, poll with a 1s timeout so we can flush the swap file
+            // every ~30s even when the user is idle. Clean buffers block forever.
+            int k = readKey(dirty() ? 1000 : -1);
+            if (k == K_NONE) { maybeSwapSave(); continue; }
+            process(k);
+            refresh();  // redraw immediately so status messages appear right away
         }
         restoreTerm();
+        if (!swapPath.empty()) unlink(swapPath.c_str());  // clean exit: remove swap
         if (inFd != 0) close(inFd);
         if (emitOnExit) {
             Text t;
@@ -1339,6 +1602,140 @@ class Editor {
 };
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Configuration file handling.
+//
+// The config file is a small INI-style file with a single [editor] section.
+// We parse it leniently: blank lines and lines starting with '#' or ';' are
+// comments; a `key = value` line is applied to the Config struct. Keys are
+// only honoured inside the [editor] section (or at the top of the file, which
+// we treat as [editor] for convenience). Unknown keys and malformed values are
+// ignored so a hand-edited file can never crash the editor.
+//
+// Precedence (highest first): command-line flags > HED_* env vars > config
+// file > built-in defaults. loadConfig() applies defaults, then the file, then
+// the environment; the caller (cmdEdit) lets explicit CLI flags win last.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Parse a boolean value leniently: true/false, yes/no, on/off, 1/0.
+bool cfgBool(const std::string& v, bool& out) {
+    std::string s = toLower(v);
+    if (s == "true" || s == "yes" || s == "on" || s == "1") { out = true; return true; }
+    if (s == "false" || s == "no" || s == "off" || s == "0") { out = false; return true; }
+    return false;
+}
+
+// Parse an integer within [lo, hi].
+bool cfgInt(const std::string& v, long lo, long hi, long& out) {
+    if (v.empty()) return false;
+    char* e = nullptr;
+    errno = 0;
+    long n = strtol(v.c_str(), &e, 10);
+    if (errno || !e || *e || n < lo || n > hi) return false;
+    out = n;
+    return true;
+}
+
+// Apply one `key = value` pair to a Config. Returns false if the key is
+// unknown or the value is malformed (caller decides whether to ignore).
+bool cfgApply(Config& c, const std::string& key, const std::string& val) {
+    long n;
+    if (key == "tabsize") return cfgInt(val, 1, 32, n) ? (c.tabsize = (int)n, true) : false;
+    if (key == "indent") {
+        std::string s = toLower(val);
+        if (s == "auto" || s == "0") { c.indent = 0; return true; }
+        if (s == "tabs" || s == "1") { c.indent = 1; return true; }
+        if (s == "spaces" || s == "2") { c.indent = 2; return true; }
+        return false;
+    }
+    if (key == "spaces") return cfgInt(val, 1, 16, n) ? (c.spaces = (int)n, true) : false;
+    if (key == "spell") return cfgBool(val, c.spell);
+    if (key == "numbers") return cfgBool(val, c.numbers);
+    if (key == "theme") {
+        std::string s = toLower(val);
+        if (s == "catppuccin" || s == "dark" || s == "light") { c.theme = s; return true; }
+        return false;
+    }
+    if (key == "log_size") return cfgInt(val, 0, 1 << 30, n) ? (c.logSize = (size_t)n, true) : false;
+    return false;  // unknown key
+}
+
+// Overlay HED_* environment variables onto a Config (they beat the file but
+// lose to command-line flags). Invalid values are silently ignored.
+void cfgApplyEnv(Config& c) {
+    const char* v;
+    if ((v = getenv("HED_TABSIZE"))) { long n; if (cfgInt(v, 1, 32, n)) c.tabsize = (int)n; }
+    if ((v = getenv("HED_INDENT"))) { std::string s = toLower(v); if (s == "auto" || s == "0") c.indent = 0; else if (s == "tabs" || s == "1") c.indent = 1; else if (s == "spaces" || s == "2") c.indent = 2; }
+    if ((v = getenv("HED_SPACES"))) { long n; if (cfgInt(v, 1, 16, n)) c.spaces = (int)n; }
+    if ((v = getenv("HED_SPELL"))) { bool b; if (cfgBool(v, b)) c.spell = b; }
+    if ((v = getenv("HED_NUMBERS"))) { bool b; if (cfgBool(v, b)) c.numbers = b; }
+    if ((v = getenv("HED_THEME"))) { std::string s = toLower(v); if (s == "catppuccin" || s == "dark" || s == "light") c.theme = s; }
+    if ((v = getenv("HED_LOG_SIZE"))) { long n; if (cfgInt(v, 0, 1 << 30, n)) c.logSize = (size_t)n; }
+}
+
+}  // namespace
+
+std::string configFilePath() { return configDir() + "/config"; }
+
+Config loadConfig() {
+    Config c;  // built-in defaults
+    std::string data, err;
+    if (readFile(configFilePath(), data, err)) {
+        // Parse the INI file. We only honour keys in the [editor] section
+        // (top-of-file keys are treated as [editor] for convenience).
+        bool inEditor = true;
+        for (auto& raw : splitSimple(data, '\n')) {
+            std::string line = trimRight(raw);
+            if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+            if (line[0] == '[') {
+                inEditor = toLower(trimRight(line)) == "[editor]";
+                continue;
+            }
+            if (!inEditor) continue;
+            size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            std::string key = toLower(trimRight(line.substr(0, eq)));
+            std::string val = trimRight(line.substr(eq + 1));
+            size_t vs = val.find_first_not_of(" \t");  // strip leading whitespace
+            if (vs != std::string::npos) val.erase(0, vs);
+            cfgApply(c, key, val);  // ignore malformed/unknown keys
+        }
+    }
+    cfgApplyEnv(c);  // environment beats the file
+    return c;
+}
+
+bool saveConfig(const Config& c, std::string& err) {
+    // Write a fresh, well-commented config file with the current values.
+    std::string out =
+        "# hed configuration\n"
+        "#\n"
+        "# This file is written by `hed config set KEY VALUE` and read on every\n"
+        "# editor start. You can also edit it by hand. Precedence (highest first):\n"
+        "#   command-line flags > HED_* environment variables > this file > defaults.\n"
+        "#\n"
+        "# Recognised keys (all optional):\n"
+        "#   tabsize   tab display width (1-32)\n"
+        "#   indent    auto | tabs | spaces   (indent style)\n"
+        "#   spaces    indent width in columns when indent = spaces (1-16)\n"
+        "#   spell     true | false   start with misspelling underlining on\n"
+        "#   numbers   true | false   show the line-number gutter\n"
+        "#   theme     catppuccin | dark | light   syntax colour palette\n"
+        "#   log_size  status messages kept in memory / shown by `hed log` (0 = unlimited)\n"
+        "\n"
+        "[editor]\n"
+        "tabsize = " + std::to_string(c.tabsize) + "\n"
+        "indent = " + std::string(c.indent == 1 ? "tabs" : c.indent == 2 ? "spaces" : "auto") + "\n"
+        "spaces = " + std::to_string(c.spaces) + "\n"
+        "spell = " + std::string(c.spell ? "true" : "false") + "\n"
+        "numbers = " + std::string(c.numbers ? "true" : "false") + "\n"
+        "theme = " + c.theme + "\n"
+        "log_size = " + std::to_string(c.logSize) + "\n";
+    if (!mkdirParents(configDir(), err)) return false;
+    return atomicWrite(configFilePath(), out, err);
+}
 
 int runEditor(const EditorOptions& o) {
     Editor e(o);

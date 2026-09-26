@@ -26,10 +26,12 @@ install: hed
 	install -Dm755 hed $(DESTDIR)$(PREFIX)/bin/hed
 	install -Dm644 completions/hed.bash $(DESTDIR)$(PREFIX)/share/bash-completion/completions/hed
 	install -Dm644 completions/hed.fish $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/hed.fish
+	install -Dm644 completions/hed.zsh $(DESTDIR)$(PREFIX)/share/zsh/site-functions/_hed
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/hed $(DESTDIR)$(PREFIX)/share/bash-completion/completions/hed \
-	      $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/hed.fish
+	      $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/hed.fish \
+	      $(DESTDIR)$(PREFIX)/share/zsh/site-functions/_hed
 
 test: hed
 	bash tests/run.sh

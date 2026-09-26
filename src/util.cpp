@@ -124,6 +124,14 @@ bool isDir(const std::string& p) {
     return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+// Modification time in nanoseconds since the epoch (so same-second edits are
+// still ordered correctly, e.g. for swap-file crash recovery). -1 if missing.
+long fileMtime(const std::string& p) {
+    struct stat st;
+    if (stat(p.c_str(), &st) != 0) return -1;
+    return (long)st.st_mtim.tv_sec * 1000000000L + (long)st.st_mtim.tv_nsec;
+}
+
 std::string dirName(const std::string& p) {
     size_t k = p.find_last_of('/');
     if (k == std::string::npos) return ".";

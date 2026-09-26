@@ -111,20 +111,20 @@ Key notation: `^X` = Ctrl+X, `M-X` = Alt+X (or Esc then X), `^\` = Ctrl+Backslas
 | `M-D` | Duplicate current line |
 | `M-3` or `M-#` | Toggle comment on current line or selection. Uses language-appropriate comment style. |
 | `Esc` | Clear mark, search highlight, and status message |
-| `^C` | Show position info: line/total (percent), column, byte count, indent style, CRLF status |
+| Mouse | Click moves the cursor; scroll wheel scrolls. The status bar always shows `Ln X, Col Y` plus undo/redo depth. |
 
 ### 3.5 Spell Checking
 
 | Key | Action |
 |---|---|
-| `^T` or `F7` | Spell walk — jump to next misspelled word. Prompts with up to 9 suggestions. |
+| `^T` or `F7` | Spell walk — jump to next misspelled word. Prompts with up to 6 suggestions. |
 | `M-S` | Toggle misspelling underline on/off |
 
 **Spell walk keys** (active during `^T`/`F7` prompt):
 
 | Key | Action |
 |---|---|
-| `1`–`9` | Replace with suggestion N |
+| `1`–`6` | Replace with suggestion N |
 | `a` | Add word to personal dictionary (`~/.config/hed/words.txt`) |
 | `i` | Ignore word for this session |
 | `e` | Edit word manually (prompts for replacement) |
@@ -136,7 +136,7 @@ Key notation: `^X` = Ctrl+X, `M-X` = Alt+X (or Esc then X), `^\` = Ctrl+Backslas
 | Key | Action |
 |---|---|
 | `M-N` | Toggle line-number gutter |
-| `^C` | Show position info in status bar |
+| Mouse | Click moves cursor, wheel scrolls |
 
 ### 3.7 Help Bar (bottom of screen)
 
@@ -300,7 +300,7 @@ When `--lang` is not specified, the editor detects language from:
 
 ### 7.4 Spell Checking
 
-- **Interactive walk:** `^T` or `F7` starts a spell walk. At each misspelling, you get up to 9 suggestions. Press `1`–`9` to pick one, `a` to add the word to your personal dictionary, `i` to ignore it this session, `e` to type a custom replacement, or `n`/`Space` to skip.
+- **Interactive walk:** `^T` or `F7` starts a spell walk. At each misspelling, you get up to 6 suggestions. Press `1`–`6` to pick one, `a` to add the word to your personal dictionary, `i` to ignore it this session, `e` to type a custom replacement, or `n`/`Space` to skip.
 - **Personal dictionary:** Words added with `a` are saved to `~/.config/hed/words.txt` and remembered across sessions.
 - **Toggle underline:** `M-S` toggles the red underline on misspelled words without stopping the spell walk.
 - **Code vs. prose:** In source code files, only comments and string literals are checked. In Markdown and HTML, text content is checked. Identifiers, paths, URLs, camelCase, and acronyms are always skipped.
@@ -375,7 +375,7 @@ Press `^G` or `F1` inside the editor to see the built-in help screen. It summari
 | `M-D` | Duplicate line |
 | `M-Up` | Move line up |
 | `M-Down` | Move line down |
-| `^C` | Position info |
+| Mouse | Click moves cursor, wheel scrolls |
 | `^A` / `Home` | Smart home |
 | `^E` / `End` | End of line |
 | `Ctrl+Home` / `M-\` | Top of file |
@@ -389,3 +389,46 @@ Press `^G` or `F1` inside the editor to see the built-in help screen. It summari
 | `Esc` | Clear mark/highlight/message |
 | `←` `→` `↑` `↓` | Cursor movement |
 | `PgUp` / `PgDn` | Page up / down |
+
+---
+
+## 8. Configuration, status log & crash recovery
+
+### 8.1 Configuration file
+
+Editor settings live in `~/.config/hed/config` (or `$XDG_CONFIG_HOME/hed/config`), an INI-style file with an `[editor]` section:
+
+```ini
+[editor]
+tabsize = 4
+indent = auto        # auto | tabs | spaces
+spaces = 4
+spell = true
+numbers = true
+theme = catppuccin   # catppuccin | dark | light
+log_size = 100       # 0 = unlimited
+```
+
+View or edit it with `hed config`:
+
+```
+hed config              # print the file path and effective settings
+hed config get theme    # print one setting
+hed config set theme dark   # set and save
+```
+
+Precedence (highest first): **command-line flags > `HED_*` environment variables > config file > defaults**. The environment variables are `HED_TABSIZE`, `HED_INDENT`, `HED_SPACES`, `HED_SPELL`, `HED_NUMBERS`, `HED_THEME`, and `HED_LOG_SIZE`.
+
+### 8.2 Status message log
+
+Every status message is appended to `~/.config/hed/log/YYYY-MM-DD.log` (one file per day) and kept in an in-memory ring buffer sized by `log_size`. Show the last N messages with:
+
+```
+hed log          # last 50 messages from today
+hed log 10       # last 10
+hed log -n 5     # same
+```
+
+### 8.3 Crash recovery (swap files)
+
+While editing a named file, hed keeps a swap file at `~/.config/hed/swap/FILENAME.swp`. The buffer is flushed to it every ~30 seconds while dirty, so a crash (kill, power loss, terminal close) loses at most 30 seconds of edits. On the next start, if the swap file is newer than the original file, hed shows **"Swap file found, press R to recover"** — press `R` to restore the swap content, or any other key to discard it. The swap file is removed on a clean exit.

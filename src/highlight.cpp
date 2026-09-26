@@ -816,23 +816,73 @@ void highlightLine(LangId id, const std::string& line, HlState& st, std::vector<
     }
 }
 
+// ---------------------------------------------------------------------------
+// Syntax colour themes.
+//
+// The editor picks a palette with setTheme() (driven by the `theme` config
+// setting: "catppuccin" | "dark" | "light"). Each palette maps a highlight
+// token (H_COMMENT, H_STRING, ...) to an SGR escape sequence. The default
+// "catppuccin" palette is the original hed look; "dark" is a vivid palette for
+// dark terminals; "light" uses darker foregrounds that stay readable on a
+// light background. Unknown theme names fall back to catppuccin.
+// ---------------------------------------------------------------------------
+namespace {
+std::string g_theme = "catppuccin";
+
+struct Palette {
+    const char* comment, *string, *number, *keyword, *type, *builtin, *func,
+        *variable, *constant, *tag, *attr, *preproc, *escape, *property, *op;
+};
+
+const Palette PAL_CAT = {
+    "\x1b[3;38;5;244m", "\x1b[38;5;114m", "\x1b[38;5;215m", "\x1b[38;5;176m",
+    "\x1b[38;5;80m", "\x1b[38;5;110m", "\x1b[38;5;75m", "\x1b[38;5;180m",
+    "\x1b[38;5;209m", "\x1b[38;5;203m", "\x1b[38;5;179m", "\x1b[38;5;141m",
+    "\x1b[38;5;208m", "\x1b[38;5;117m", "\x1b[38;5;247m",
+};
+const Palette PAL_DARK = {
+    "\x1b[3;38;5;242m", "\x1b[38;5;150m", "\x1b[38;5;216m", "\x1b[38;5;168m",
+    "\x1b[38;5;81m", "\x1b[38;5;117m", "\x1b[38;5;39m", "\x1b[38;5;186m",
+    "\x1b[38;5;209m", "\x1b[38;5;203m", "\x1b[38;5;179m", "\x1b[38;5;141m",
+    "\x1b[38;5;208m", "\x1b[38;5;117m", "\x1b[38;5;250m",
+};
+const Palette PAL_LIGHT = {
+    "\x1b[3;38;5;242m", "\x1b[38;5;28m", "\x1b[38;5;130m", "\x1b[38;5;89m",
+    "\x1b[38;5;23m", "\x1b[38;5;31m", "\x1b[38;5;25m", "\x1b[38;5;94m",
+    "\x1b[38;5;124m", "\x1b[38;5;124m", "\x1b[38;5;94m", "\x1b[38;5;55m",
+    "\x1b[38;5;130m", "\x1b[38;5;25m", "\x1b[38;5;240m",
+};
+
+const Palette* palette() {
+    if (g_theme == "dark") return &PAL_DARK;
+    if (g_theme == "light") return &PAL_LIGHT;
+    return &PAL_CAT;
+}
+}  // namespace
+
+void setTheme(const std::string& name) {
+    if (name == "dark" || name == "light") g_theme = name;
+    else g_theme = "catppuccin";  // unknown theme -> safe default
+}
+
 const char* hlSgr(uint8_t h) {
+    const Palette* p = palette();
     switch (h) {
-        case H_COMMENT: return "\x1b[3;38;5;244m";
-        case H_STRING: return "\x1b[38;5;114m";
-        case H_NUMBER: return "\x1b[38;5;215m";
-        case H_KEYWORD: return "\x1b[38;5;176m";
-        case H_TYPE: return "\x1b[38;5;80m";
-        case H_BUILTIN: return "\x1b[38;5;110m";
-        case H_FUNCTION: return "\x1b[38;5;75m";
-        case H_VARIABLE: return "\x1b[38;5;180m";
-        case H_CONSTANT: return "\x1b[38;5;209m";
-        case H_TAG: return "\x1b[38;5;203m";
-        case H_ATTR: return "\x1b[38;5;179m";
-        case H_PREPROC: return "\x1b[38;5;141m";
-        case H_ESCAPE: return "\x1b[38;5;208m";
-        case H_PROPERTY: return "\x1b[38;5;117m";
-        case H_OPERATOR: return "\x1b[38;5;247m";
+        case H_COMMENT: return p->comment;
+        case H_STRING: return p->string;
+        case H_NUMBER: return p->number;
+        case H_KEYWORD: return p->keyword;
+        case H_TYPE: return p->type;
+        case H_BUILTIN: return p->builtin;
+        case H_FUNCTION: return p->func;
+        case H_VARIABLE: return p->variable;
+        case H_CONSTANT: return p->constant;
+        case H_TAG: return p->tag;
+        case H_ATTR: return p->attr;
+        case H_PREPROC: return p->preproc;
+        case H_ESCAPE: return p->escape;
+        case H_PROPERTY: return p->property;
+        case H_OPERATOR: return p->op;
         default: return "";
     }
 }

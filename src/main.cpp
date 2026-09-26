@@ -121,6 +121,8 @@ COMMANDS
   delete  FILE            delete a line range or lines matching a pattern
   spell   [FILE...]       spell-check (code: comments+strings only; prose: everything)
   langs                   list languages for syntax highlighting / --lang
+  config                  view or edit ~/.config/hed/config (editor settings)
+  log     [N]             show the last N status messages from the editor log
   edit    [FILE]          interactive editor (use when FILE is named like a command)
 
   'hed <command> --help' shows every option of a command.
@@ -271,6 +273,40 @@ Keys (nano-like): ^S save ^O save-as ^X exit ^W find ^R replace ^K cut ^U paste 
 ^Y redo ^_ go-to-line ^T spell ^^ mark M-3 comment. ^G inside the editor shows everything.
 Piping: 'cmd | hed', 'hed > out.txt' and 'cmd | hed | cmd2' open the editor on the
 terminal and emit the final buffer on stdout when you press ^X (^Q aborts, exit 1).
+)";
+
+static const char* CONFIG_HELP = R"(hed config [get KEY | set KEY VALUE]
+
+Views or edits the editor configuration file (~/.config/hed/config, or
+$XDG_CONFIG_HOME/hed/config). The file is INI-style with an [editor] section.
+
+  hed config              print the config file path and the effective settings
+  hed config get KEY      print one setting
+  hed config set KEY VAL  set one setting and save it to the file
+
+Settings (precedence: command-line flags > HED_* env vars > this file > defaults):
+  tabsize   tab display width (1-32)
+  indent    auto | tabs | spaces
+  spaces    indent width in columns when indent = spaces (1-16)
+  spell     true | false
+  numbers   true | false
+  theme     catppuccin | dark | light
+  log_size  status messages kept in memory / shown by 'hed log' (0 = unlimited)
+)";
+
+static const char* LOG_HELP = R"(hed log [N] [options]
+
+Shows the last N status messages the editor logged to
+~/.config/hed/log/YYYY-MM-DD.log (one file per day). Default N = 50.
+
+  -n, --lines N   number of messages to show (default 50)
+)";
+
+static const char* LANGS_HELP = R"(hed langs      (aliases: languages)
+
+Lists the languages hed knows for syntax highlighting and --lang.
+
+  python bash fish javascript typescript sql html css json markdown text
 )";
 
 static bool wantsHelp(const std::vector<std::string>& a) {
@@ -979,7 +1015,8 @@ static int cmdEdit(const std::vector<std::string>& a, size_t start) {
     Parsed p;
     std::string err;
     if (!parseArgs(a, start, {{"lang", 'l', true}, {"tabsize", 'T', true}, {"tabs", 0, false}, {"spaces", 0, true},
-                              {"no-spell", 0, false}, {"no-numbers", 0, false}, {"readonly", 'R', false}, {"line", 0, true}},
+                              {"no-spell", 0, false}, {"no-numbers", 0, false}, {"readonly", 'R', false}, {"line", 0, true},
+                              {"log-size", 0, true}},
                    p, err))
         return usageErr("edit", err);
     EditorOptions o;
@@ -996,9 +1033,26 @@ static int cmdEdit(const std::vector<std::string>& a, size_t start) {
         if (!langFromName(p.get("lang"), o.lang)) return usageErr("edit", "unknown language (see 'hed langs')");
         o.langSet = true;
     }
+    // Apply config + environment defaults, then let explicit CLI flags win.
+    // Precedence: CLI flag > HED_* env var > config file > built-in default.
+    Config cfg = loadConfig();
+    if (!p.has("tabsize")) o.tabsize = cfg.tabsize;
+    if (!p.has("tabs") && !p.has("spaces")) {
+        o.indentMode = cfg.indent;
+        if (cfg.indent == 2 && cfg.spaces > 0) o.indentWidth = cfg.spaces;
+    }
+    if (!p.has("no-spell")) o.spell = cfg.spell;
+    if (!p.has("no-numbers")) o.numbers = cfg.numbers;
+    o.theme = cfg.theme;
+    o.logSize = cfg.logSize;
     if (p.has("tabsize")) o.tabsize = atoi(p.get("tabsize").c_str());
     if (p.has("tabs")) o.indentMode = 1;
     if (p.has("spaces")) { o.indentMode = 2; o.indentWidth = atoi(p.get("spaces").c_str()); if (o.indentWidth < 1) o.indentWidth = 4; }
+    if (p.has("log-size")) {
+        long v;
+        if (!parseInt(p.get("log-size"), v) || v < 0) return usageErr("edit", "bad --log-size (0 = unlimited)");
+        o.logSize = (size_t)v;
+    }
     o.spell = !p.has("no-spell");
     o.numbers = !p.has("no-numbers");
     o.readOnly = p.has("readonly");
@@ -1008,6 +1062,125 @@ static int cmdEdit(const std::vector<std::string>& a, size_t start) {
         if (!isatty(0)) readFd(0, o.initial);
     }
     return runEditor(o);
+}
+
+// ------------------------------------------------------------------ config
+// Apply a config key/value pair to a Config, validating the value. Returns
+// false (with a message in err) if the key is unknown or the value is bad.
+static bool configSet(Config& c, const std::string& key, const std::string& val, std::string& err) {
+    long n;
+    if (key == "tabsize") {
+        if (!parseInt(val, n) || n < 1 || n > 32) { err = "tabsize must be an integer 1-32"; return false; }
+        c.tabsize = (int)n; return true;
+    }
+    if (key == "indent") {
+        std::string v = toLower(val);
+        if (v == "auto" || v == "0") { c.indent = 0; return true; }
+        if (v == "tabs" || v == "1") { c.indent = 1; return true; }
+        if (v == "spaces" || v == "2") { c.indent = 2; return true; }
+        err = "indent must be auto, tabs or spaces"; return false;
+    }
+    if (key == "spaces") {
+        if (!parseInt(val, n) || n < 1 || n > 16) { err = "spaces must be an integer 1-16"; return false; }
+        c.spaces = (int)n; return true;
+    }
+    if (key == "spell") {
+        std::string v = toLower(val);
+        if (v == "true" || v == "yes" || v == "on" || v == "1") { c.spell = true; return true; }
+        if (v == "false" || v == "no" || v == "off" || v == "0") { c.spell = false; return true; }
+        err = "spell must be true or false"; return false;
+    }
+    if (key == "numbers") {
+        std::string v = toLower(val);
+        if (v == "true" || v == "yes" || v == "on" || v == "1") { c.numbers = true; return true; }
+        if (v == "false" || v == "no" || v == "off" || v == "0") { c.numbers = false; return true; }
+        err = "numbers must be true or false"; return false;
+    }
+    if (key == "theme") {
+        std::string v = toLower(val);
+        if (v == "catppuccin" || v == "dark" || v == "light") { c.theme = v; return true; }
+        err = "theme must be catppuccin, dark or light"; return false;
+    }
+    if (key == "log_size") {
+        if (!parseInt(val, n) || n < 0) { err = "log_size must be a non-negative integer (0 = unlimited)"; return false; }
+        c.logSize = (size_t)n; return true;
+    }
+    err = "unknown setting '" + key + "' (see 'hed config --help')";
+    return false;
+}
+
+// Return the current string value of a config key (for `hed config get`).
+static std::string configValue(const Config& c, const std::string& key) {
+    if (key == "tabsize") return std::to_string(c.tabsize);
+    if (key == "indent") return std::string(c.indent == 1 ? "tabs" : c.indent == 2 ? "spaces" : "auto");
+    if (key == "spaces") return std::to_string(c.spaces);
+    if (key == "spell") return std::string(c.spell ? "true" : "false");
+    if (key == "numbers") return std::string(c.numbers ? "true" : "false");
+    if (key == "theme") return c.theme;
+    if (key == "log_size") return std::to_string(c.logSize);
+    return "";
+}
+
+static void configPrint(const Config& c) {
+    printf("config file: %s\n", configFilePath().c_str());
+    printf("tabsize     = %d\n", c.tabsize);
+    printf("indent      = %s\n", c.indent == 1 ? "tabs" : c.indent == 2 ? "spaces" : "auto");
+    printf("spaces      = %d\n", c.spaces);
+    printf("spell       = %s\n", c.spell ? "true" : "false");
+    printf("numbers     = %s\n", c.numbers ? "true" : "false");
+    printf("theme       = %s\n", c.theme.c_str());
+    printf("log_size    = %zu\n", c.logSize);
+}
+
+static int cmdConfig(const std::vector<std::string>& a) {
+    if (wantsHelp(a)) { printf("%s", CONFIG_HELP); return 0; }
+    Parsed p;
+    std::string err;
+    if (!parseArgs(a, 1, {}, p, err)) return usageErr("config", err);
+    Config c = loadConfig();  // defaults + file + HED_* env vars
+    if (p.pos.empty()) { configPrint(c); return 0; }
+    const std::string& op = p.pos[0];
+    if (op == "get") {
+        if (p.pos.size() != 2) return usageErr("config", "usage: hed config get KEY");
+        std::string v = configValue(c, p.pos[1]);
+        if (v.empty()) return fail("unknown setting '" + p.pos[1] + "' (see 'hed config --help')");
+        printf("%s\n", v.c_str());
+        return 0;
+    }
+    if (op == "set") {
+        if (p.pos.size() != 3) return usageErr("config", "usage: hed config set KEY VALUE");
+        if (!configSet(c, p.pos[1], p.pos[2], err)) return fail(err);
+        if (!saveConfig(c, err)) return fail("could not write config: " + err);
+        printf("hed: %s = %s  (saved to %s)\n", p.pos[1].c_str(), p.pos[2].c_str(), configFilePath().c_str());
+        return 0;
+    }
+    return usageErr("config", "usage: hed config [get KEY | set KEY VALUE]");
+}
+
+// ------------------------------------------------------------------ log
+static int cmdLog(const std::vector<std::string>& a) {
+    if (wantsHelp(a)) { printf("%s", LOG_HELP); return 0; }
+    Parsed p;
+    std::string err;
+    if (!parseArgs(a, 1, {{"lines", 'n', true}}, p, err)) return usageErr("log", err);
+    long n = 50;
+    if (p.has("lines") && (!parseInt(p.get("lines"), n) || n < 0)) return usageErr("log", "bad --lines");
+    if (!p.pos.empty()) {
+        if (!parseInt(p.pos[0], n) || n < 0) return usageErr("log", "bad argument (expected a message count)");
+    }
+    // Today's log file: ~/.config/hed/log/YYYY-MM-DD.log
+    char ts[64];
+    time_t now = time(nullptr);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    strftime(ts, sizeof ts, "%Y-%m-%d", &tmv);
+    std::string path = configDir() + "/log/" + ts + ".log";
+    std::string content;
+    if (!readFile(path, content, err)) { printf("hed: no status log yet (%s)\n", path.c_str()); return 0; }
+    std::vector<std::string> lines = linesOf(content);
+    size_t start = lines.size() > (size_t)n ? lines.size() - (size_t)n : 0;
+    for (size_t i = start; i < lines.size(); i++) printf("%s\n", lines[i].c_str());
+    return 0;
 }
 
 // ------------------------------------------------------------------ main
@@ -1029,6 +1202,9 @@ int main(int argc, char** argv) {
             if (s == "insert" || s == "ins") return cmdInsert(b);
             if (s == "delete" || s == "del") return cmdDelete(b);
             if (s == "spell") return cmdSpell(b);
+            if (s == "config") return cmdConfig(b);
+            if (s == "log") return cmdLog(b);
+            if (s == "langs" || s == "languages") { printf("%s", LANGS_HELP); return 0; }
             if (s == "edit") { printf("%s", EDIT_HELP); return 0; }
         }
         printf(MAIN_HELP, VERSION);
@@ -1045,7 +1221,13 @@ int main(int argc, char** argv) {
     if (c == "insert" || c == "ins") return cmdInsert(a);
     if (c == "delete" || c == "del") return cmdDelete(a);
     if (c == "spell") return cmdSpell(a);
-    if (c == "langs" || c == "languages") { printf("%s", langTable().c_str()); return 0; }
+    if (c == "langs" || c == "languages") {
+        if (wantsHelp(a)) { printf("%s", LANGS_HELP); return 0; }
+        printf("%s", langTable().c_str());
+        return 0;
+    }
+    if (c == "config") return cmdConfig(a);
+    if (c == "log") return cmdLog(a);
     if (c == "edit" || c == "e") return cmdEdit(a, 1);
     return cmdEdit(a, 0);
 }
