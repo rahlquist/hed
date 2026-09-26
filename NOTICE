@@ -1,0 +1,13 @@
+Third-party material bundled in hed
+===================================
+
+data/en_freq.txt (embedded into the hed binary at build time)
+  Source : https://github.com/wolfgarbe/SymSpell  (SymSpell/frequency_dictionary_en_82_765.txt)
+  License: MIT License, Copyright (c) 2018 Wolf Garbe
+  Note   : upstream describes this list as the intersection of SCOWL (Spell Checker
+           Oriented Word Lists, permissive license) and word counts from the Google Books
+           Ngram dataset (CC BY 3.0). It is distributed by the SymSpell project under MIT.
+
+No other third-party code is included. Everything in src/ is original to hed (MIT).
+The spelling algorithm (frequency-ranked Damerau-Levenshtein candidates) is a
+well-known technique implemented from scratch; no SymSpell code is used.
