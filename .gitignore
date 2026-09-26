@@ -1,5 +1,6 @@
 /hed
 src/*.o
 src/*.d
+src/dict_embed.inc
 *.tmp
 .hed-tmp-*

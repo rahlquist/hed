@@ -129,7 +129,11 @@ bool isDir(const std::string& p) {
 long fileMtime(const std::string& p) {
     struct stat st;
     if (stat(p.c_str(), &st) != 0) return -1;
+#if defined(__APPLE__)
+    return (long)st.st_mtimespec.tv_sec * 1000000000L + (long)st.st_mtimespec.tv_nsec;
+#else
     return (long)st.st_mtim.tv_sec * 1000000000L + (long)st.st_mtim.tv_nsec;
+#endif
 }
 
 std::string dirName(const std::string& p) {
