@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hed terminal mockup</title>
+<style>
+  :root {
+    --bg: #1e1e2e;
+    --fg: #cdd6f4;
+    --title-bg: #45475a;
+    --title-fg: #cdd6f4;
+    --status-bg: #313244;
+    --status-fg: #a6adc8;
+    --help-bg: #1e1e2e;
+    --help-fg: #cdd6f4;
+    --help-key: #f9e2af;
+    --border: #45475a;
+    --green: #a6e3a1;
+    --red: #f38ba8;
+    --yellow: #f9e2af;
+    --blue: #89b4fa;
+    --cyan: #94e2d5;
+    --magenta: #cba6f7;
+    --orange: #fab387;
+    --comment: #6c7086;
+    --string: #a6e3a1;
+    --number: #fab387;
+    --keyword: #cba6f7;
+    --type: #89dceb;
+    --builtin: #89b4fa;
+    --function: #89b4fa;
+    --variable: #f38ba8;
+    --constant: #fab387;
+    --tag: #f38ba8;
+    --attr: #f9e2af;
+    --preproc: #cba6f7;
+    --escape: #94e2d5;
+    --property: #89dceb;
+    --operator: #cdd6f4;
+    --gutter: #585b70;
+    --cursor: #f5e0dc;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #11111b;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    padding: 20px;
+  }
+  .terminal {
+    background: var(--bg);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    max-width: 900px;
+    width: 100%;
+  }
+  .title-bar {
+    background: var(--title-bg);
+    color: var(--title-fg);
+    padding: 8px 16px;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .title-bar .dirty { color: var(--yellow); }
+  .title-bar .readonly { color: var(--red); }
+  .title-bar .info { color: var(--status-fg); font-weight: normal; }
+  .text-area {
+    padding: 0;
+    min-height: 300px;
+    position: relative;
+  }
+  .line {
+    display: flex;
+    white-space: pre;
+  }
+  .line .gutter {
+    color: var(--gutter);
+    min-width: 50px;
+    text-align: right;
+    padding-right: 12px;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .line .gutter.current { color: var(--fg); }
+  .line .content {
+    flex: 1;
+    padding-right: 16px;
+  }
+  .line .content .cursor {
+    background: var(--cursor);
+    color: var(--bg);
+  }
+  .status-bar {
+    background: var(--status-bg);
+    color: var(--status-fg);
+    padding: 6px 16px;
+    font-size: 13px;
+  }
+  .help-bar {
+    background: var(--help-bg);
+    color: var(--help-fg);
+    padding: 6px 16px;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .help-bar .key { color: var(--help-key); font-weight: bold; }
+  .help-section {
+    display: flex;
+    gap: 24px;
+  }
+  .help-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .help-item .key {
+    background: var(--title-bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .spell-underline {
+    text-decoration: underline wavy var(--red);
+    text-decoration-thickness: 2px;
+  }
+  .search-highlight {
+    background: var(--yellow);
+    color: var(--bg);
+  }
+  .selection {
+    background: #45475a;
+  }
+  .truncated::after {
+    content: '>';
+    color: var(--gutter);
+    position: absolute;
+    right: 8px;
+  }
+  .empty-line .gutter { color: var(--gutter); }
+  .empty-line .gutter::after { content: '~'; }
+</style>
+</head>
+<body>
+<div class="terminal">
+  <!-- Title bar -->
+  <div class="title-bar">
+    <span>hed  app.py <span class="dirty">[+]</span></span>
+    <span class="info">Ln 5/12 Col 12  python  spell</span>
+  </div>
+
+  <!-- Text area -->
+  <div class="text-area">
+    <div class="line">
+      <span class="gutter">1</span>
+      <span class="content"><span class="keyword">def</span> <span class="function">main</span>():</span>
+    </div>
+    <div class="line">
+      <span class="gutter">2</span>
+      <span class="content">    <span class="comment"># This is a comment with a teh typo</span></span>
+    </div>
+    <div class="line">
+      <span class="gutter">3</span>
+      <span class="content">    <span class="builtin">print</span>(<span class="string">"hello world"</span>)</span>
+    </div>
+    <div class="line">
+      <span class="gutter">4</span>
+      <span class="content">    <span class="keyword">if</span> <span class="constant">True</span>:</span>
+    </div>
+    <div class="line">
+      <span class="gutter current">5</span>
+      <span class="content">        <span class="builtin">print</span>(<span class="string">"hi"</span>)<span class="cursor"> </span></span>
+    </div>
+    <div class="line">
+      <span class="gutter">6</span>
+      <span class="content">    <span class="keyword">return</span> <span class="number">0</span></span>
+    </div>
+    <div class="line">
+      <span class="gutter">7</span>
+      <span class="content"> </span>
+    </div>
+    <div class="line">
+      <span class="gutter">8</span>
+      <span class="content"><span class="keyword">class</span> <span class="type">MyClass</span>:</span>
+    </div>
+    <div class="line">
+      <span class="gutter">9</span>
+      <span class="content">    <span class="keyword">def</span> <span class="function">__init__</span>(<span class="variable">self</span>):</span>
+    </div>
+    <div class="line">
+      <span class="gutter">10</span>
+      <span class="content">        <span class="variable">self</span>.x = <span class="number">1</span></span>
+    </div>
+    <div class="line">
+      <span class="gutter">11</span>
+      <span class="content">        <span class="variable">self</span>.y = <span class="number">2</span></span>
+    </div>
+    <div class="line">
+      <span class="gutter">12</span>
+      <span class="content">        <span class="keyword">pass</span></span>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span>Search: "print"</span>
+  </div>
+
+  <!-- Help bar -->
+  <div class="help-bar">
+    <div class="help-section">
+      <div class="help-item"><span class="key">^G</span> Help</div>
+      <div class="help-item"><span class="key">^S</span> Save</div>
+      <div class="help-item"><span class="key">^W</span> Find</div>
+      <div class="help-item"><span class="key">^R</span> Replace</div>
+      <div class="help-item"><span class="key">^K</span> Cut</div>
+      <div class="help-item"><span class="key">^Z</span> Undo</div>
+      <div class="help-item"><span class="key">^_</span> Go To</div>
+      <div class="help-item"><span class="key">^T</span> Spell</div>
+    </div>
+    <div class="help-section">
+      <div class="help-item"><span class="key">^X</span> Exit</div>
+      <div class="help-item"><span class="key">^O</span> Save As</div>
+      <div class="help-item"><span class="key">^N</span> Next</div>
+      <div class="help-item"><span class="key">^P</span> Prev</div>
+      <div class="help-item"><span class="key">^U</span> Paste</div>
+      <div class="help-item"><span class="key">^Y</span> Redo</div>
+      <div class="help-item"><span class="key">^^</span> Mark</div>
+      <div class="help-item"><span class="key">M-3</span> Comment</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

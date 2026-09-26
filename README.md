@@ -1,72 +1,160 @@
 # hed
 
-A single static C++17 binary that is three things at once:
+> A heredoc replacement, agent-friendly file tool, and nano-style editor — all in one static C++17 binary with zero runtime dependencies.
 
-1. **A heredoc replacement** — `hed write FILE` takes stdin or `-c 'text'`, writes atomically, and works the same in bash, zsh and **fish** (which has no heredocs).
-2. **An agent-friendly one-shot file tool** — `show`, `search`, `replace`, `insert`, `delete`, `spell`. Never prompts, prints a unified diff of every change, refuses ambiguous edits, and uses meaningful exit codes.
-3. **A nano-style editor** — `hed FILE` opens a full-screen editor with syntax highlighting, live search, replace, undo/redo, mark/cut/paste, comment toggling, and an interactive spell checker. `cmd | hed | cmd2` works like `vipe`.
+---
 
-Syntax highlighting: Python, Bash/sh/zsh (including heredoc bodies), fish, JavaScript, TypeScript, SQL, HTML (with embedded `<script>`/`<style>`), CSS/SCSS, JSON, Markdown.
+## Overview
 
-Spell checking: 82,765-word frequency dictionary embedded in the binary, suggestion ranking by edit distance + word frequency, suffix/prefix awareness (running, unconfigured), contractions, plus a built-in tech vocabulary and a personal dictionary. In code, only comments and string literals are checked; identifiers, paths, URLs, camelCase and ACRONYMS are skipped.
+**hed** is three tools in a single executable:
 
-No runtime dependencies: no ncurses, no hunspell, no data files.
+1. **Heredoc replacement** — `hed write FILE` accepts stdin or `-c 'text'`, writes atomically, and behaves identically in bash, zsh, and fish (which has no heredocs).
+2. **Agent-friendly one-shot tool** — `show`, `search`, `replace`, `insert`, `delete`, and `spell`. Never prompts, prints a unified diff of every change, refuses ambiguous edits, and uses meaningful exit codes for scripting.
+3. **Nano-style editor** — `hed FILE` opens a full-screen editor with syntax highlighting, live search, replace, undo/redo, mark/cut/paste, comment toggling, and an interactive spell checker. `cmd | hed | cmd2` works like `vipe`.
+
+**Syntax highlighting:** Python, Bash/sh/zsh (including heredoc bodies), fish, JavaScript, TypeScript, SQL, HTML (with embedded `<script>`/`<style>`), CSS/SCSS, JSON, Markdown.
+
+**Spell checking:** 82,765-word SymSpell frequency dictionary embedded in the binary, with suggestion ranking by edit distance + word frequency, suffix/prefix awareness, contraction handling, a built-in tech vocabulary, and a personal dictionary. In code, only comments and string literals are checked — identifiers, paths, URLs, camelCase, and ACRONYMS are skipped.
+
+**No runtime dependencies:** no ncurses, no hunspell, no data files.
+
+---
+
+## Three modes at a glance
+
+```mermaid
+flowchart LR
+    A["hed binary"] --> B["One-shot<br/>hed write|show|search|replace|insert|delete|spell"]
+    A --> C["Pipe<br/>cmd | hed | cmd2"]
+    A --> D["Interactive<br/>hed FILE"]
+```
+
+| Mode | Use case | Example |
+|------|----------|---------|
+| **One-shot** | Scripts, agents, automation — never prompts, machine-readable exit codes | `hed replace app.py 'retries = 3' 'retries = 5'` |
+| **Pipe** | Edit text in a pipeline — reads stdin, writes result to stdout on exit | `git log -1 --format=%B \| hed` |
+| **Interactive** | Full-screen editing with highlighting, search, undo, spell check | `hed src/main.cpp` |
+
+---
 
 ## Build & install
 
+**Requirements:** g++ ≥ 9 or clang++ ≥ 10 (C++17). No other dependencies.
+
 ```bash
-make                 # needs g++ >= 9 or clang++ >= 10 (C++17)
-make test            # 32 checks, includes fish if installed
-sudo make install    # /usr/local/bin/hed + bash & fish completions
-make static          # fully static, stripped binary you can scp anywhere
+make                 # build ./hed
+make test            # run the test suite (32 shell checks + 12 PTY editor tests)
+sudo make install    # install to /usr/local/bin/hed + bash & fish completions
+make static          # fully static, stripped binary — scp to any Linux box
 ```
 
-## One-shot examples
+Other targets:
+
+| Target | Description |
+|--------|-------------|
+| `make uninstall` | Remove installed binary and completions |
+| `make clean` | Remove build artifacts |
+
+---
+
+## Quick start
+
+### One-shot commands
 
 ```bash
-# heredoc replacement (bash)
+# Write (heredoc replacement) — literal text, atomic, works in bash/zsh/fish
 hed write config.yaml <<'EOF'
 key: value
 EOF
 
-# same thing in fish or bash: indented single-quoted block, dedented automatically
+# Same thing in fish or bash: indented single-quoted block, dedented automatically
 hed write -p -m 755 ~/bin/hello -d -c '
     #!/usr/bin/env bash
     echo "hello $USER"
 '
 
-hed show app.py -n -r 40:+20          # numbered slice
-hed search 'def main' src/*.py -C 2   # grep-style
-hed replace app.py 'retries = 3' 'retries = 5'      # must be unique, prints diff
+# Show with line numbers and a range
+hed show app.py -n -r 40:+20
+
+# Search (grep-style, with context)
+hed search 'def main' src/*.py -C 2
+
+# Replace — must match exactly once unless --all or --nth
+hed replace app.py 'retries = 3' 'retries = 5'
 hed replace app.py 'print(' 'log(' --all --expect 7 -b
+
+# Insert after a matching line
 hed insert app.py --after-match 'import os' -c 'import sys'
+
+# Delete a line range
 hed delete app.py --range 88:90
-hed spell README.md                   # exit 1 if typos found
-git log -1 --format=%B | hed spell    # pipes work everywhere
+
+# Spell check — exits 1 if typos found
+hed spell README.md
+git log -1 --format=%B | hed spell
 ```
 
-Exit codes: `0` ok · `1` not found / misspellings · `2` usage or I/O error · `3` ambiguous or `--expect` mismatch (nothing written).
+### Pipe mode
 
-Backups (`-b`) are named `DIR/YYYYmmddHHMMSS-FILENAME`.
+```bash
+# Edit piped text in the editor; result goes to stdout
+cat config.yaml | hed | tee config.yaml.new
+
+# Filter through an editor step
+git diff | hed | grep '^+' > additions.txt
+```
+
+### Interactive mode
+
+```bash
+# Open a file for editing (nano-like)
+hed src/main.cpp
+
+# Open at a specific line and column
+hed src/main.cpp +42:10
+
+# Force a language, disable spell underlining
+hed notes.txt --lang markdown --no-spell
+
+# View-only mode
+hed /etc/hosts -R
+```
+
+---
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | No match found, or misspellings detected |
+| `2` | Usage error or I/O error |
+| `3` | Ambiguous match, or `--expect` count mismatch (nothing written) |
+
+---
 
 ## Editor keys
 
 | Key | Action | Key | Action |
-|---|---|---|---|
-| ^S | save | ^O | save as |
-| ^X | exit (asks to save) | ^Q | quit / abort |
-| ^W / ^F | live search (smart-case) | ^N / ^P | next / previous match |
-| ^R or ^\\ | replace (y/n/all) | ^_ / ^L | go to line[:col] |
-| ^K | cut line (repeat to collect) or selection | ^U | paste |
-| ^^ or M-A | set mark (select) | M-6 | copy |
-| ^Z / ^Y | undo / redo | M-3 | toggle comment |
-| M-Up/Down | move line | M-D | duplicate line |
-| ^T or F7 | spell walk (1-9 pick, a add, i ignore, e edit) | M-S | toggle spell underline |
-| Tab / Shift-Tab | indent / outdent (selection too) | M-N | toggle line numbers |
-| ^G / F1 | help | ^C | position info |
+|-----|--------|-----|--------|
+| `^S` | Save | `^O` | Save as |
+| `^X` | Exit (prompts to save) | `^Q` | Quit / abort |
+| `^W` / `^F` | Live search (smart-case) | `^N` / `^P` | Next / previous match |
+| `^R` or `^\` | Replace (y/n/all) | `^_` / `^L` | Go to line[:col] |
+| `^K` | Cut line (repeat to collect) or selection | `^U` | Paste |
+| `^^` or `M-A` | Set mark (select) | `M-6` | Copy |
+| `^Z` / `^Y` | Undo / redo | `M-3` | Toggle comment |
+| `M-Up` / `M-Down` | Move line | `M-D` | Duplicate line |
+| `^T` or `F7` | Spell walk (1–9 pick, `a` add, `i` ignore, `e` edit) | `M-S` | Toggle spell underline |
+| `Tab` / `Shift-Tab` | Indent / outdent (selection too) | `M-N` | Toggle line numbers |
+| `^G` / `F1` | Help | `^C` | Position info |
 
-Also: auto-indent (with language-aware extra indent after `:`, `{`, `then`, `function` …), smart Home, bracketed paste, UTF-8/wide characters, CRLF preservation, indentation style detection, `+LINE:COL` on the command line.
+**Also:** auto-indent (language-aware extra indent after `:`, `{`, `then`, `function`…), smart Home, bracketed paste, UTF-8/wide characters, CRLF preservation, indentation style detection, and `+LINE:COL` on the command line.
 
-## Licensing
+---
 
-hed itself is MIT (see `LICENSE`). The only bundled third-party material is the SymSpell English frequency dictionary (MIT, © Wolf Garbe) — see `NOTICE`.
+## License
+
+hed is released under the **MIT License** — see [`LICENSE`](LICENSE).
+
+The only bundled third-party material is the SymSpell English frequency dictionary (MIT, © Wolf Garbe) — see [`NOTICE`](NOTICE).
