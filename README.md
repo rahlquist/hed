@@ -39,6 +39,17 @@ flowchart LR
 
 ---
 
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **Linux** | ✅ Native | Primary target. `make && sudo make install` |
+| **macOS** | ✅ Supported | Intel & Apple Silicon. `g++` (Homebrew) or `clang++` (Xcode CLT). No `-static` flag. |
+| **Windows (WSL)** | ✅ Native | WSL is Linux — works out of the box. |
+| **Windows (native)** | ❌ Not supported | No Win32 terminal API support. Use WSL. |
+
+**macOS requirements:** Xcode Command Line Tools (`xcode-select --install`) or Homebrew (`brew install g++`).
+
 ## Build & install
 
 **Requirements:** g++ ≥ 9 or clang++ ≥ 10 (C++17). No other dependencies.
@@ -46,8 +57,8 @@ flowchart LR
 ```bash
 make                 # build ./hed
 make test            # run the test suite (32 shell checks + 12 PTY editor tests)
-sudo make install    # install to /usr/local/bin/hed + bash & fish completions
-make static          # fully static, stripped binary — scp to any Linux box
+sudo make install    # install to /usr/local/bin/hed + bash, fish & zsh completions
+make static          # fully static, stripped binary — Linux only
 ```
 
 Other targets:
