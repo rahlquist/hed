@@ -407,7 +407,7 @@ indent = auto        # auto | tabs | spaces
 spaces = 4
 spell = true
 numbers = true
-theme = catppuccin   # catppuccin | dark | light
+theme = catppuccin   # built-in or a custom theme (see 10.2)
 log_size = 100       # 0 = unlimited
 ```
 
@@ -421,7 +421,28 @@ hed config set theme dark   # set and save
 
 Precedence (highest first): **command-line flags > `HED_*` environment variables > config file > defaults**. The environment variables are `HED_TABSIZE`, `HED_INDENT`, `HED_SPACES`, `HED_SPELL`, `HED_NUMBERS`, `HED_THEME`, and `HED_LOG_SIZE`.
 
-### 10.2 Status message log
+### 10.2 Custom themes
+
+Three themes are built in — `catppuccin` (default), `dark`, and `light` — and you can add your own without recompiling. The quickest way is to generate a template from the current theme and edit it:
+
+```bash
+hed theme create mytheme
+$EDITOR ~/.config/hed/themes/mytheme.theme   # or wherever $XDG_CONFIG_HOME points
+hed config set theme mytheme
+```
+
+`hed theme` lists every available theme (built-in + custom). A theme file is INI-style with a `[theme]` section; each key maps a highlight type to the numeric part of an SGR escape sequence (the editor wraps values in `ESC[<value>m`):
+
+```ini
+[theme]
+comment = 3;38;5;244    # italic + grey
+string  = 38;5;114      # 256-colour blue
+number  = 38;5;215
+```
+
+The recognised keys are `comment`, `string`, `number`, `keyword`, `type`, `builtin`, `function`, `variable`, `constant`, `tag`, `attr`, `preproc`, `escape`, `property`, `operator`. Values may combine attributes and colours (`1;31` = bold red, `3;38;5;244` = italic grey). Missing keys fall back to catppuccin. If the selected theme file is missing or malformed, hed warns on stderr and falls back to catppuccin. A custom theme with the same name as a built-in overrides it.
+
+### 10.3 Status message log
 
 Every status message is appended to `~/.config/hed/log/YYYY-MM-DD.log` (one file per day) and kept in an in-memory ring buffer sized by `log_size`. Show the last N messages with:
 
@@ -431,15 +452,15 @@ hed log 10       # last 10
 hed log -n 5     # same
 ```
 
-### 10.3 Crash recovery (swap files)
+### 10.4 Crash recovery (swap files)
 
 While editing a named file, hed keeps a swap file at `~/.config/hed/swap/FILENAME.swp`. The buffer is flushed to it every ~30 seconds while dirty, so a crash (kill, power loss, terminal close) loses at most 30 seconds of edits. On the next start, if the swap file is newer than the original file, hed shows **"Swap file found, press R to recover"** — press `R` to restore the swap content, or any other key to discard it. The swap file is removed on a clean exit.
 
-### 10.4 Shell completions
+### 10.5 Shell completions
 
 `make install` installs tab-completion for **bash**, **fish**, and **zsh**. Completions cover all commands, their options, the language identifiers, and the theme values (`catppuccin`, `dark`, `light`). The zsh completion also completes `config get`/`set` keys and `--lang`/`--theme` values.
 
-### 10.5 Missing-terminal error
+### 10.6 Missing-terminal error
 
 If the editor is launched without a usable terminal (e.g. from a script or agent with no TTY), hed prints a clear message and exits 2, pointing you to the one-shot commands instead:
 

@@ -2,7 +2,7 @@
 _hed() {
     local cur prev cmd
     cur="${COMP_WORDS[COMP_CWORD]}"; prev="${COMP_WORDS[COMP_CWORD-1]}"; cmd="${COMP_WORDS[1]}"
-    local cmds="write show search replace insert delete spell langs config log edit help"
+    local cmds="write show search replace insert delete spell langs config theme log edit help"
     case "$prev" in
         -l|--lang) COMPREPLY=($(compgen -W "python bash fish javascript typescript sql html css json markdown text" -- "$cur")); return;;
         --color) COMPREPLY=($(compgen -W "auto always never" -- "$cur")); return;;

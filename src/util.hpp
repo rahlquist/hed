@@ -52,6 +52,8 @@ size_t displayWidth(const std::string& s);
 std::string jsonEscape(const std::string& s);
 std::string homeDir();
 std::string configDir();
+std::string themesDir();  // ~/.config/hed/themes (honours $XDG_CONFIG_HOME)
+bool listDir(const std::string& dir, std::vector<std::string>& out);  // entry names, false if unreadable/missing
 
 std::string unifiedDiff(const std::vector<std::string>& a, const std::vector<std::string>& b,
                         const std::string& nameA, const std::string& nameB, int context, bool color);

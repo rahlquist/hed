@@ -1655,7 +1655,7 @@ bool cfgApply(Config& c, const std::string& key, const std::string& val) {
     if (key == "numbers") return cfgBool(val, c.numbers);
     if (key == "theme") {
         std::string s = toLower(val);
-        if (s == "catppuccin" || s == "dark" || s == "light") { c.theme = s; return true; }
+        if (!s.empty()) { c.theme = s; return true; }  // setTheme() validates + falls back with a warning
         return false;
     }
     if (key == "log_size") return cfgInt(val, 0, 1 << 30, n) ? (c.logSize = (size_t)n, true) : false;
@@ -1671,7 +1671,7 @@ void cfgApplyEnv(Config& c) {
     if ((v = getenv("HED_SPACES"))) { long n; if (cfgInt(v, 1, 16, n)) c.spaces = (int)n; }
     if ((v = getenv("HED_SPELL"))) { bool b; if (cfgBool(v, b)) c.spell = b; }
     if ((v = getenv("HED_NUMBERS"))) { bool b; if (cfgBool(v, b)) c.numbers = b; }
-    if ((v = getenv("HED_THEME"))) { std::string s = toLower(v); if (s == "catppuccin" || s == "dark" || s == "light") c.theme = s; }
+    if ((v = getenv("HED_THEME"))) { std::string s = toLower(v); if (!s.empty()) c.theme = s; }
     if ((v = getenv("HED_LOG_SIZE"))) { long n; if (cfgInt(v, 0, 1 << 30, n)) c.logSize = (size_t)n; }
 }
 
@@ -1722,7 +1722,7 @@ bool saveConfig(const Config& c, std::string& err) {
         "#   spaces    indent width in columns when indent = spaces (1-16)\n"
         "#   spell     true | false   start with misspelling underlining on\n"
         "#   numbers   true | false   show the line-number gutter\n"
-        "#   theme     catppuccin | dark | light   syntax colour palette\n"
+        "#   theme     catppuccin | dark | light | <custom theme name>   syntax palette (see 'hed theme')\n"
         "#   log_size  status messages kept in memory / shown by `hed log` (0 = unlimited)\n"
         "\n"
         "[editor]\n"

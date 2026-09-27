@@ -823,7 +823,7 @@ hed edit [FILE] [+LINE[:COL]] [options]
 hed e [FILE] [+LINE[:COL]] [options]
 ```
 
-Opens a full-screen nano-style editor on FILE (or stdin). Provides syntax highlighting, live search, replace, undo/redo, mark/cut/paste, comment toggling, spell checking, **mouse support**, and **crash recovery**. Editor settings (tab size, indent, spell, line numbers, syntax theme, log size) are read from `~/.config/hed/config` (see [config](#config)); three syntax themes are available: `catppuccin`, `dark`, and `light`.
+Opens a full-screen nano-style editor on FILE (or stdin). Provides syntax highlighting, live search, replace, undo/redo, mark/cut/paste, comment toggling, spell checking, **mouse support**, and **crash recovery**. Editor settings (tab size, indent, spell, line numbers, syntax theme, log size) are read from `~/.config/hed/config` (see [config](#config)); three syntax themes are built in (`catppuccin`, `dark`, `light`) and custom themes can be added (see [theme](#theme)).
 
 When no command name is given, `hed FILE` opens the editor. This is the default action when the first argument is not a recognized command.
 
@@ -961,10 +961,35 @@ Views or edits the editor configuration file `~/.config/hed/config` (or `$XDG_CO
 | `spaces` | 1–16 | Indent width when `indent = spaces` |
 | `spell` | `true` \| `false` | Start with misspelling underlining on |
 | `numbers` | `true` \| `false` | Show the line-number gutter |
-| `theme` | `catppuccin` \| `dark` \| `light` | Syntax colour palette |
+| `theme` | `catppuccin` \| `dark` \| `light` \| custom | Syntax colour palette (custom = name of a file in `~/.config/hed/themes/`; see [theme](#theme)) |
 | `log_size` | 0+ | Status messages kept in memory (0 = unlimited) |
 
 Precedence: **command-line flags > `HED_*` environment variables > config file > defaults**. The environment variables are `HED_TABSIZE`, `HED_INDENT`, `HED_SPACES`, `HED_SPELL`, `HED_NUMBERS`, `HED_THEME`, and `HED_LOG_SIZE`.
+
+### theme
+
+```
+hed theme
+hed theme create NAME
+```
+
+Lists the available syntax themes, or creates a template for a new one. Three themes are built in — `catppuccin` (default), `dark`, and `light` — and users can add their own without recompiling.
+
+| Form | Behavior |
+|------|----------|
+| `hed theme` | List built-in and custom themes (marks the current one). |
+| `hed theme create NAME` | Write a template to `~/.config/hed/themes/NAME.theme`, seeded with the current theme's colours. |
+
+Custom themes are INI-style files in `~/.config/hed/themes/` (or `$XDG_CONFIG_HOME/hed/themes`), e.g. `~/.config/hed/themes/mytheme.theme`:
+
+```ini
+[theme]
+comment = 3;38;5;244    # italic + grey
+string  = 38;5;114      # 256-colour blue
+number  = 38;5;215
+```
+
+Each key maps a highlight type to the numeric part of an SGR escape sequence (the editor wraps values in `ESC[<value>m`). The recognised keys are `comment`, `string`, `number`, `keyword`, `type`, `builtin`, `function`, `variable`, `constant`, `tag`, `attr`, `preproc`, `escape`, `property`, `operator`. Missing keys fall back to catppuccin. Select a theme with `hed config set theme NAME` or `HED_THEME=NAME`. If the selected theme file is missing or malformed, hed warns on stderr and falls back to catppuccin. A custom theme with the same name as a built-in overrides it.
 
 ### log
 
@@ -979,7 +1004,7 @@ Shows the last N status messages the editor logged to `~/.config/hed/log/YYYY-MM
 
 ## Shell completions
 
-`make install` installs tab-completion for **bash**, **fish**, and **zsh** (installed to the system completion directories). Completions cover all commands (`write`, `show`, `search`, `replace`, `insert`, `delete`, `spell`, `langs`, `config`, `log`, `edit`, `help`), their options, the language identifiers, and the theme values (`catppuccin`, `dark`, `light`). The zsh completion also completes `config get`/`set` keys and `--lang`/`--theme` values.
+`make install` installs tab-completion for **bash**, **fish**, and **zsh** (installed to the system completion directories). Completions cover all commands (`write`, `show`, `search`, `replace`, `insert`, `delete`, `spell`, `langs`, `config`, `theme`, `log`, `edit`, `help`), their options, the language identifiers, and the theme values (`catppuccin`, `dark`, `light`). The zsh completion also completes `config get`/`set` keys and `--lang`/`--theme` values.
 
 ---
 
@@ -1013,6 +1038,7 @@ Shows the last N status messages the editor logged to `~/.config/hed/log/YYYY-MM
 
 # Editor config & status log
   hed config [get KEY | set KEY VALUE]
+  hed theme [create NAME]
   hed log [N]
 
 # Interactive editor

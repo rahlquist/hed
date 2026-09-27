@@ -122,6 +122,7 @@ COMMANDS
   spell   [FILE...]       spell-check (code: comments+strings only; prose: everything)
   langs                   list languages for syntax highlighting / --lang
   config                  view or edit ~/.config/hed/config (editor settings)
+  theme                   list syntax themes / create a custom theme
   log     [N]             show the last N status messages from the editor log
   edit    [FILE]          interactive editor (use when FILE is named like a command)
 
@@ -290,8 +291,32 @@ Settings (precedence: command-line flags > HED_* env vars > this file > defaults
   spaces    indent width in columns when indent = spaces (1-16)
   spell     true | false
   numbers   true | false
-  theme     catppuccin | dark | light
+  theme     catppuccin | dark | light | <custom name>  (see 'hed theme')
   log_size  status messages kept in memory / shown by 'hed log' (0 = unlimited)
+)";
+
+static const char* THEME_HELP = R"(hed theme [create NAME]
+
+Lists the available syntax themes, or creates a template for a new one.
+Themes are INI-style files; each key maps a highlight type to the numeric part
+of an SGR escape sequence (the editor wraps values in ESC[<value>m).
+
+  hed theme               list built-in and custom themes
+  hed theme create NAME   write a template to ~/.config/hed/themes/NAME.theme
+                          (colours start as the current theme's)
+
+Custom themes live in ~/.config/hed/themes/ (or $XDG_CONFIG_HOME/hed/themes),
+e.g. ~/.config/hed/themes/mytheme.theme:
+
+  [theme]
+  comment = 3;38;5;244      # italic + grey
+  string  = 38;5;114        # 256-colour blue
+  number  = 38;5;215
+
+Recognised keys: comment string number keyword type builtin function variable
+constant tag attr preproc escape property operator. Missing keys fall back to
+catppuccin. Select a theme with 'hed config set theme NAME' or HED_THEME=NAME.
+A custom theme named like a built-in (catppuccin, dark, light) overrides it.
 )";
 
 static const char* LOG_HELP = R"(hed log [N] [options]
@@ -1098,8 +1123,10 @@ static bool configSet(Config& c, const std::string& key, const std::string& val,
     }
     if (key == "theme") {
         std::string v = toLower(val);
-        if (v == "catppuccin" || v == "dark" || v == "light") { c.theme = v; return true; }
-        err = "theme must be catppuccin, dark or light"; return false;
+        if (themeExists(v)) { c.theme = v; return true; }
+        err = "theme \"" + v + "\" not found (built-in: catppuccin, dark, light; or create ~/.config/hed/themes/" + v +
+              ".theme with 'hed theme create " + v + "')";
+        return false;
     }
     if (key == "log_size") {
         if (!parseInt(val, n) || n < 0) { err = "log_size must be a non-negative integer (0 = unlimited)"; return false; }
@@ -1157,6 +1184,47 @@ static int cmdConfig(const std::vector<std::string>& a) {
     return usageErr("config", "usage: hed config [get KEY | set KEY VALUE]");
 }
 
+// ------------------------------------------------------------------ theme
+static int cmdTheme(const std::vector<std::string>& a) {
+    if (wantsHelp(a)) { printf("%s", THEME_HELP); return 0; }
+    Parsed p;
+    std::string err;
+    if (!parseArgs(a, 1, {}, p, err)) return usageErr("theme", err);
+    if (p.pos.empty()) {
+        Config c = loadConfig();  // effective theme (config file + HED_THEME)
+        auto themes = availableThemes();
+        printf("Available themes (%s):\n", themesDir().c_str());
+        for (auto& [name, customFile] : themes) {
+            const char* kind = !customFile ? "built-in" : (name == "catppuccin" || name == "dark" || name == "light")
+                                                        ? "custom (overrides built-in)" : "custom";
+            printf("  %-12s %-24s %s\n", name.c_str(), kind, name == c.theme ? "(current)" : "");
+        }
+        if (themes.size() == 3)
+            printf("No custom themes yet - create one with 'hed theme create NAME'.\n");
+        return 0;
+    }
+    const std::string& op = p.pos[0];
+    if (op == "create") {
+        if (p.pos.size() != 2) return usageErr("theme", "usage: hed theme create NAME");
+        std::string name = toLower(p.pos[1]);
+        if (name.empty() || name.find('/') != std::string::npos || name.find('\\') != std::string::npos ||
+            name[0] == '.' || name.find_first_of(" \t") != std::string::npos)
+            return fail("invalid theme name \"" + name +
+                        "\" (letters, digits, '-', '_'; no slashes, spaces or leading '.')");
+        std::string dir = themesDir();
+        if (!mkdirParents(dir, err)) return fail("could not create " + dir + ": " + err);
+        std::string path = dir + "/" + name + ".theme";
+        if (pathExists(path)) return fail(path + " already exists - edit it in place instead");
+        Config c = loadConfig();
+        if (!atomicWrite(path, themeTemplate(c.theme), err)) return fail("could not write " + path + ": " + err);
+        printf("hed: created %s\n", path.c_str());
+        printf("     (colours from the current theme \"%s\"; edit the file, then select it)\n", c.theme.c_str());
+        printf("       hed config set theme %s\n", name.c_str());
+        return 0;
+    }
+    return usageErr("theme", "usage: hed theme [create NAME]");
+}
+
 // ------------------------------------------------------------------ log
 static int cmdLog(const std::vector<std::string>& a) {
     if (wantsHelp(a)) { printf("%s", LOG_HELP); return 0; }
@@ -1203,6 +1271,7 @@ int main(int argc, char** argv) {
             if (s == "delete" || s == "del") return cmdDelete(b);
             if (s == "spell") return cmdSpell(b);
             if (s == "config") return cmdConfig(b);
+            if (s == "theme") return cmdTheme(b);
             if (s == "log") return cmdLog(b);
             if (s == "langs" || s == "languages") { printf("%s", LANGS_HELP); return 0; }
             if (s == "edit") { printf("%s", EDIT_HELP); return 0; }
@@ -1227,6 +1296,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (c == "config") return cmdConfig(a);
+    if (c == "theme") return cmdTheme(a);
     if (c == "log") return cmdLog(a);
     if (c == "edit" || c == "e") return cmdEdit(a, 1);
     return cmdEdit(a, 0);

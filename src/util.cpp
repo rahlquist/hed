@@ -14,6 +14,7 @@
 #include <cstring>
 #include <ctime>
 #include <cwchar>
+#include <dirent.h>
 
 namespace hed {
 
@@ -465,6 +466,20 @@ std::string configDir() {
     const char* x = getenv("XDG_CONFIG_HOME");
     std::string base = (x && *x) ? std::string(x) : homeDir() + "/.config";
     return base + "/hed";
+}
+
+std::string themesDir() { return configDir() + "/themes"; }
+
+bool listDir(const std::string& dir, std::vector<std::string>& out) {
+    DIR* d = opendir(dir.c_str());
+    if (!d) return false;
+    struct dirent* e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;  // skip . and ..
+        out.emplace_back(e->d_name);
+    }
+    closedir(d);
+    return true;
 }
 
 // ---------------------------------------------------------------- diff (Myers)

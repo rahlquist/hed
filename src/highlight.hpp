@@ -24,12 +24,28 @@ struct HlState {
 
 struct CommentStyle { std::string line, open, close; };
 
+// A syntax colour palette: one full SGR escape sequence (e.g. "\x1b[38;5;114m")
+// per highlight token. The built-in palettes are compiled in; custom palettes
+// are loaded from ~/.config/hed/themes/<name>.theme files.
+struct Palette {
+    std::string comment, string, number, keyword, type, builtin, func,
+        variable, constant, tag, attr, preproc, escape, property, op;
+};
+
 const char* langName(LangId id);
 bool langFromName(const std::string& name, LangId& out);
 LangId detectLang(const std::string& path, const std::string& content);
 std::string langTable();
 void highlightLine(LangId id, const std::string& line, HlState& st, std::vector<uint8_t>& hl);
-void setTheme(const std::string& name);  // "catppuccin" (default) | "dark" | "light"; unknown -> catppuccin
+void setTheme(const std::string& name);  // built-in (catppuccin|dark|light) or a custom theme; custom file
+                                         // overrides a built-in of the same name; missing -> catppuccin + stderr warning
+// Custom themes: INI-style files at ~/.config/hed/themes/<name>.theme with a
+// [theme] section mapping highlight keys to SGR parameters ("38;5;114").
+// Missing keys fall back to the built-in catppuccin value for that key.
+bool loadCustomTheme(const std::string& name, Palette& out);  // false if the file is missing or malformed
+bool themeExists(const std::string& name);                    // built-in, or an existing custom theme file
+std::string themeTemplate(const std::string& name);           // INI template from that theme's palette
+std::vector<std::pair<std::string, bool>> availableThemes();  // (name, backed-by-custom-file), built-ins first
 const char* hlSgr(uint8_t h);
 bool spellRegion(LangId id, uint8_t h);
 CommentStyle commentStyle(LangId id);

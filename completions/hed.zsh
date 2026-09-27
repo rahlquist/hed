@@ -6,7 +6,7 @@ _hed_langs=(python bash fish javascript typescript sql html css json markdown te
 
 _hed() {
   local -a cmds
-  cmds=(write show search replace insert delete spell langs config log edit help)
+  cmds=(write show search replace insert delete spell langs config theme log edit help)
   if (( CURRENT == 2 )); then
     _describe 'command' cmds
     _files

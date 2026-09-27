@@ -6,7 +6,7 @@ H = os.environ.get("HED") or os.path.join(os.path.dirname(os.path.abspath(__file
 H = os.path.abspath(H)
 C = lambda c: chr(ord(c) & 0x1F)
 
-def run(args, keys, stdin_data=None, resize_after=None):
+def run(args, keys, stdin_data=None, resize_after=None, capture=False):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["TERM"] = "xterm-256color"
@@ -15,12 +15,15 @@ def run(args, keys, stdin_data=None, resize_after=None):
             o = os.open("pipe_out.txt", os.O_WRONLY | os.O_CREAT | os.O_TRUNC); os.dup2(o, 1)
         os.execv(H, [H] + args)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+    out_buf = []
     def drain(t):
         end = time.time() + t
         while time.time() < end:
             r, _, _ = select.select([fd], [], [], 0.05)
             if r:
-                try: os.read(fd, 65536)
+                try:
+                    d = os.read(fd, 65536)
+                    if d and capture: out_buf.append(d)
                 except OSError: return
     drain(0.5)
     for i, k in enumerate(keys):
@@ -30,7 +33,8 @@ def run(args, keys, stdin_data=None, resize_after=None):
         os.write(fd, k.encode()); drain(0.15)
     drain(0.4)
     _, st = os.waitpid(pid, 0)
-    return os.waitstatus_to_exitcode(st)
+    rc = os.waitstatus_to_exitcode(st)
+    return (rc, b"".join(out_buf)) if capture else rc
 
 def put(name, s): open(name, "w").write(s)
 def get(name): return open(name).read()
@@ -41,6 +45,7 @@ def check(name, cond):
     print(("ok   " if cond else "FAIL ") + name)
 
 os.chdir(tempfile.mkdtemp())
+os.environ["HOME"] = os.getcwd()   # isolate config/themes from the real home
 run(["new.py"], ["def f(x):\r", "return x\r", C("s"), C("x")])
 check("auto-indent + save", get("new.py").startswith("def f(x):\n    return x\n"))
 
@@ -83,6 +88,17 @@ check("left over wide chars", get("w.txt") == "日|本語\n")
 put("r.txt", "a\n")
 rc = run(["r.txt"], [C("e"), "b", C("s"), C("x")], resize_after=1)
 check("survives SIGWINCH resize", rc == 0 and get("r.txt") == "ab\n")
+
+# custom theme: HED_THEME selects a theme file; the editor renders its SGR colours
+os.makedirs(os.path.join(os.getcwd(), ".config", "hed", "themes"), exist_ok=True)
+with open(os.path.join(os.getcwd(), ".config", "hed", "themes", "mint.theme"), "w") as f:
+    f.write("[theme]\ncomment = 38;5;196\nkeyword = 38;5;220\n")
+put("th.py", "def f():  # note\n    x = 1\n")
+os.environ["HED_THEME"] = "mint"
+_, cap = run(["th.py"], [C("x")], capture=True)
+check("custom theme SGR rendered", b"\x1b[38;5;196m" in cap and b"\x1b[38;5;220m" in cap)
+check("custom theme overrides default", b"\x1b[3;38;5;244m" not in cap)
+del os.environ["HED_THEME"]
 
 print(f"passed: {sum(results)}  failed: {len(results) - sum(results)}")
 sys.exit(0 if all(results) else 1)

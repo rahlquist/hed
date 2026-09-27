@@ -3,6 +3,7 @@
 set -u
 H="${HED:-$(cd "$(dirname "$0")/.." && pwd)/hed}"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; cd "$T"
+export HOME="$T"   # isolate config/themes so tests never touch the real ~/.config/hed
 pass=0; failn=0
 ok()  { pass=$((pass+1)); }
 bad() { failn=$((failn+1)); echo "FAIL: $*"; }
@@ -58,5 +59,19 @@ if command -v fish >/dev/null; then
   '"
   check "fish write" test "$(cat fish.txt)" = 'from fish'
 fi
+
+# custom themes (HOME is isolated above, so this never touches the real config)
+$H theme create mytest >/dev/null
+check "theme create"   test -f "$HOME/.config/hed/themes/mytest.theme"
+check "theme lists custom" bash -c "$H theme | grep -q '^  mytest'"
+check "theme template keys" bash -c "grep -q '^keyword = ' \"$HOME/.config/hed/themes/mytest.theme\""
+$H config set theme mytest >/dev/null 2>&1
+check "config set accepts custom" test "$($H config get theme)" = mytest
+$H config set theme nope 2>/dev/null; check "config set rejects unknown" test $? -eq 2
+check "HED_THEME custom" test "$(HED_THEME=mytest $H config get theme)" = mytest
+$H theme create catppuccin >/dev/null 2>&1   # allowed: overrides the built-in
+check "override builtin allowed" test -f "$HOME/.config/hed/themes/catppuccin.theme"
+check "override listed as custom" bash -c "$H theme | grep -q 'overrides built-in'"
+
 echo "passed: $pass  failed: $failn"
 [ $failn -eq 0 ]

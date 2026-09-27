@@ -125,7 +125,7 @@ flowchart LR
 - **Spell walk** (`spellWalk`): Iterates misspellings, offers up to **6** suggestions (keys `1`–`6`), add-to-dictionary, ignore, edit, or skip.
 - **Status message log**: every status message is appended to `~/.config/hed/log/YYYY-MM-DD.log` and kept in an in-memory ring buffer sized by `log_size` (config), so `hed log` can show it later.
 - **Crash recovery (swap files)**: while editing a named file, the buffer is flushed to `~/.config/hed/swap/FILENAME.swp` every ~30 s while dirty. On startup, if the swap file is newer than the original, hed prompts **"Swap file found, press R to recover"** (`R` restores, any other key discards). The swap file is removed on a clean exit.
-- **Config + themes**: editor settings (tab size, indent, spell, numbers, theme, log size) are loaded from `~/.config/hed/config` via `loadConfig()` (precedence: CLI flags > `HED_*` env vars > config file > defaults). The syntax theme (`catppuccin` | `dark` | `light`) is applied via `setTheme()`.
+- **Config + themes**: editor settings (tab size, indent, spell, numbers, theme, log size) are loaded from `~/.config/hed/config` via `loadConfig()` (precedence: CLI flags > `HED_*` env vars > config file > defaults). The syntax theme is applied via `setTheme()`: three palettes are built in (`catppuccin` | `dark` | `light`) and any other name is loaded from a custom theme file at `~/.config/hed/themes/<name>.theme`.
 - **Missing-terminal error**: if no TTY is available, hed prints a clear message pointing to the one-shot commands and exits 2.
 - **Pipe mode**: When stdin/stdout is not a TTY, opens `/dev/tty` for the editor UI. On `^X`, writes buffer to stdout. On `^Q`, exits with code 1.
 
@@ -139,7 +139,7 @@ flowchart LR
   - `hlMarkdown`: Line-oriented (fences, headings, inline code, links, comments).
 - **Highlight types** (`Hl` enum): `H_NORMAL`, `H_COMMENT`, `H_STRING`, `H_NUMBER`, `H_KEYWORD`, `H_TYPE`, `H_BUILTIN`, `H_FUNCTION`, `H_VARIABLE`, `H_CONSTANT`, `H_TAG`, `H_ATTR`, `H_PREPROC`, `H_ESCAPE`, `H_PROPERTY`, `H_OPERATOR`.
 - **Output**: `highlightLine` fills a `vector<uint8_t>` (one byte per input byte). `hlSgr` maps each type to an SGR escape sequence. `renderAnsi` produces the final string with optional underline overlays.
-- **Themes** (`setTheme`): three colour palettes — `catppuccin` (the original hed look), `dark` (vivid colours for dark terminals), and `light` (darker foregrounds readable on a light background). The active palette is selected by the `theme` config setting; unknown names fall back to `catppuccin`. `hlSgr` looks up colours from the active `Palette`.
+- **Themes** (`setTheme`): three colour palettes are compiled in — `catppuccin` (the original hed look), `dark` (vivid colours for dark terminals), and `light` (darker foregrounds readable on a light background). Any other theme name is loaded from `~/.config/hed/themes/<name>.theme` (INI-style, `[theme]` section) via `loadCustomTheme()`; a custom file with a built-in's name overrides it, and a missing or malformed custom theme falls back to `catppuccin` with a warning. `hlSgr` looks up colours from the active `Palette`.
 
 ### spell.cpp — Spell Checker
 
@@ -527,4 +527,4 @@ These are consistent across all one-shot commands, making `hed` scriptable:
 - **Crash recovery**: swap files (`~/.config/hed/swap/`) are flushed every ~30 s while dirty, so a crash loses at most 30 s of edits; a newer swap file triggers a recover prompt on the next start.
 - **Status log**: every status message is both shown in the status bar and persisted to `~/.config/hed/log/YYYY-MM-DD.log`, giving a durable audit trail via `hed log`.
 - **Mouse support**: SGR mouse reporting (`?1000`) is enabled alongside bracketed paste; clicks move the cursor and the wheel scrolls, with no extra dependency.
-- **Themes**: syntax colours are palette-driven (`catppuccin` | `dark` | `light`), selected by the `theme` config setting.
+- **Themes**: syntax colours are palette-driven (built-in `catppuccin` | `dark` | `light`, or a custom theme file in `~/.config/hed/themes/`), selected by the `theme` config setting.

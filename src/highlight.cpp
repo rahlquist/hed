@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "highlight.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <sstream>
@@ -820,20 +821,16 @@ void highlightLine(LangId id, const std::string& line, HlState& st, std::vector<
 // Syntax colour themes.
 //
 // The editor picks a palette with setTheme() (driven by the `theme` config
-// setting: "catppuccin" | "dark" | "light"). Each palette maps a highlight
-// token (H_COMMENT, H_STRING, ...) to an SGR escape sequence. The default
-// "catppuccin" palette is the original hed look; "dark" is a vivid palette for
-// dark terminals; "light" uses darker foregrounds that stay readable on a
-// light background. Unknown theme names fall back to catppuccin.
+// setting or HED_THEME). Each palette maps a highlight token (H_COMMENT,
+// H_STRING, ...) to an SGR escape sequence. Three palettes are compiled in:
+// "catppuccin" (the original hed look, also the default), "dark" (a vivid
+// palette for dark terminals) and "light" (darker foregrounds readable on a
+// light background). Any other name is looked up as a custom theme file at
+// ~/.config/hed/themes/<name>.theme (INI-style, [theme] section). A custom
+// file with a built-in's name overrides the built-in. If a custom theme is
+// missing or malformed, setTheme() falls back to catppuccin with a warning.
 // ---------------------------------------------------------------------------
 namespace {
-std::string g_theme = "catppuccin";
-
-struct Palette {
-    const char* comment, *string, *number, *keyword, *type, *builtin, *func,
-        *variable, *constant, *tag, *attr, *preproc, *escape, *property, *op;
-};
-
 const Palette PAL_CAT = {
     "\x1b[3;38;5;244m", "\x1b[38;5;114m", "\x1b[38;5;215m", "\x1b[38;5;176m",
     "\x1b[38;5;80m", "\x1b[38;5;110m", "\x1b[38;5;75m", "\x1b[38;5;180m",
@@ -853,36 +850,148 @@ const Palette PAL_LIGHT = {
     "\x1b[38;5;130m", "\x1b[38;5;25m", "\x1b[38;5;240m",
 };
 
-const Palette* palette() {
-    if (g_theme == "dark") return &PAL_DARK;
-    if (g_theme == "light") return &PAL_LIGHT;
-    return &PAL_CAT;
+const Palette* g_palette = &PAL_CAT;  // active palette; setTheme() points this at a built-in or loaded custom palette
+
+const Palette* palette() { return g_palette; }
+
+// Theme file key -> Palette member. Keys are the user-facing names; the struct
+// fields use short names for the same positions.
+struct KeyField { const char* key; std::string Palette::* f; };
+const KeyField THEME_FIELDS[] = {
+    {"comment", &Palette::comment}, {"string", &Palette::string}, {"number", &Palette::number},
+    {"keyword", &Palette::keyword}, {"type", &Palette::type}, {"builtin", &Palette::builtin},
+    {"function", &Palette::func}, {"variable", &Palette::variable}, {"constant", &Palette::constant},
+    {"tag", &Palette::tag}, {"attr", &Palette::attr}, {"preproc", &Palette::preproc},
+    {"escape", &Palette::escape}, {"property", &Palette::property}, {"operator", &Palette::op},
+};
+
+// A theme name becomes part of a file path, so it must be a plain basename.
+bool safeThemeName(const std::string& n) {
+    return !n.empty() && n.find('/') == std::string::npos && n.find('\\') == std::string::npos &&
+           n[0] != '.' && n.find_first_of(" \t") == std::string::npos;
+}
+
+// "\x1b[38;5;114m" -> "38;5;114"  (for the theme template)
+std::string sgrParams(const std::string& seq) {
+    std::string s = seq;
+    if (startsWith(s, "\x1b[")) s.erase(0, 2);
+    if (!s.empty() && s.back() == 'm') s.pop_back();
+    return s;
 }
 }  // namespace
 
+bool loadCustomTheme(const std::string& name, Palette& out) {
+    if (!safeThemeName(name)) return false;
+    std::string path = themesDir() + "/" + name + ".theme";
+    std::string data, err;
+    if (!readFile(path, data, err)) return false;
+    Palette p = PAL_CAT;  // missing keys fall back to catppuccin
+    bool inTheme = false;
+    size_t assigned = 0;
+    for (auto& raw : splitSimple(data, '\n')) {
+        std::string line = trimRight(raw);
+        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+        if (line[0] == '[') { inTheme = toLower(trimRight(line)) == "[theme]"; continue; }
+        if (!inTheme) continue;
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = toLower(trimRight(line.substr(0, eq)));
+        std::string val = trimRight(line.substr(eq + 1));
+        size_t vs = val.find_first_not_of(" \t");
+        if (vs != std::string::npos) val.erase(0, vs);
+        if (val.empty()) continue;
+        bool okChars = true;
+        for (unsigned char c : val)
+            if (!isdigit(c) && c != ';') { okChars = false; break; }
+        if (!okChars) continue;  // not a valid SGR parameter list -> ignore this key
+        for (auto& kf : THEME_FIELDS)
+            if (key == kf.key) { p.*kf.f = std::string("\x1b[") + val + "m"; assigned++; break; }
+    }
+    if (!assigned) return false;  // malformed: no usable entries
+    out = std::move(p);
+    return true;
+}
+
+bool themeExists(const std::string& name) {
+    if (name == "catppuccin" || name == "dark" || name == "light") return true;
+    if (!safeThemeName(name)) return false;
+    return pathExists(themesDir() + "/" + name + ".theme");
+}
+
+std::vector<std::pair<std::string, bool>> availableThemes() {
+    std::vector<std::string> custom;
+    std::vector<std::string> entries;
+    if (listDir(themesDir(), entries))
+        for (auto& e : entries)
+            if (endsWith(e, ".theme") && e.size() > 6) custom.push_back(e.substr(0, e.size() - 6));
+    std::sort(custom.begin(), custom.end());
+    custom.erase(std::unique(custom.begin(), custom.end()), custom.end());
+    std::vector<std::pair<std::string, bool>> out;
+    for (const char* b : {"catppuccin", "dark", "light"})  // built-ins first
+        out.push_back({b, std::find(custom.begin(), custom.end(), b) != custom.end()});
+    for (auto& n : custom)
+        if (n != "catppuccin" && n != "dark" && n != "light") out.push_back({n, true});
+    return out;
+}
+
+std::string themeTemplate(const std::string& name) {
+    const Palette* p = &PAL_CAT;
+    std::string src = "catppuccin";
+    if (name == "dark") { p = &PAL_DARK; src = "dark"; }
+    else if (name == "light") { p = &PAL_LIGHT; src = "light"; }
+    else {
+        Palette custom;
+        if (loadCustomTheme(name, custom)) { p = &custom; src = name; }
+    }
+    std::string out =
+        "# hed theme \"" + name + "\" - colours generated from the \"" + src + "\" palette.\n"
+        "# Each key maps a highlight type to the numeric part of an SGR escape\n"
+        "# sequence (the editor wraps values in ESC[<value>m):\n"
+        "#   38;5;114     - 256-colour blue\n"
+        "#   3;38;5;244   - italic + grey\n"
+        "#   1;31         - bold + red\n"
+        "# Missing keys fall back to catppuccin. Save, then select with:\n"
+        "#   hed config set theme " + name + "    (or HED_THEME=" + name + ")\n"
+        "[theme]\n";
+    for (auto& kf : THEME_FIELDS) out += std::string(kf.key) + " = " + sgrParams(p->*kf.f) + "\n";
+    return out;
+}
+
 void setTheme(const std::string& name) {
-    if (name == "dark" || name == "light") g_theme = name;
-    else g_theme = "catppuccin";  // unknown theme -> safe default
+    // A custom theme file (even one named like a built-in) wins when present.
+    static Palette custom;
+    if (loadCustomTheme(name, custom)) { g_palette = &custom; return; }
+    bool builtin = name == "catppuccin" || name == "dark" || name == "light";
+    if (builtin) {
+        if (name == "dark") g_palette = &PAL_DARK;
+        else if (name == "light") g_palette = &PAL_LIGHT;
+        else g_palette = &PAL_CAT;
+        return;
+    }
+    g_palette = &PAL_CAT;  // custom theme missing or malformed -> safe default
+    fprintf(stderr,
+            "hed: warning: theme \"%s\" not found or malformed - using catppuccin (see 'hed theme create %s')\n",
+            name.c_str(), name.c_str());
 }
 
 const char* hlSgr(uint8_t h) {
     const Palette* p = palette();
     switch (h) {
-        case H_COMMENT: return p->comment;
-        case H_STRING: return p->string;
-        case H_NUMBER: return p->number;
-        case H_KEYWORD: return p->keyword;
-        case H_TYPE: return p->type;
-        case H_BUILTIN: return p->builtin;
-        case H_FUNCTION: return p->func;
-        case H_VARIABLE: return p->variable;
-        case H_CONSTANT: return p->constant;
-        case H_TAG: return p->tag;
-        case H_ATTR: return p->attr;
-        case H_PREPROC: return p->preproc;
-        case H_ESCAPE: return p->escape;
-        case H_PROPERTY: return p->property;
-        case H_OPERATOR: return p->op;
+        case H_COMMENT: return p->comment.c_str();
+        case H_STRING: return p->string.c_str();
+        case H_NUMBER: return p->number.c_str();
+        case H_KEYWORD: return p->keyword.c_str();
+        case H_TYPE: return p->type.c_str();
+        case H_BUILTIN: return p->builtin.c_str();
+        case H_FUNCTION: return p->func.c_str();
+        case H_VARIABLE: return p->variable.c_str();
+        case H_CONSTANT: return p->constant.c_str();
+        case H_TAG: return p->tag.c_str();
+        case H_ATTR: return p->attr.c_str();
+        case H_PREPROC: return p->preproc.c_str();
+        case H_ESCAPE: return p->escape.c_str();
+        case H_PROPERTY: return p->property.c_str();
+        case H_OPERATOR: return p->op.c_str();
         default: return "";
     }
 }

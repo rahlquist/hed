@@ -1,5 +1,5 @@
 # fish completion for hed  (SPDX-License-Identifier: MIT)
-set -l cmds write show search replace insert delete spell langs config log edit help
+set -l cmds write show search replace insert delete spell langs config theme log edit help
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a write   -d 'Write stdin/-c text to a file (heredoc replacement)'
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a show    -d 'Print with highlighting / line numbers'
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a search  -d 'Find matches'

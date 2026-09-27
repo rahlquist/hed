@@ -172,7 +172,28 @@ Mouse: **click** moves the cursor, **scroll wheel** scrolls. The status bar alwa
 
 **Editor feedback:** live search shows a `match X of Y` counter; replace prompts show `(X of Y)` plus a context snippet (`ln N: …pre [MATCH] post…`); undo/redo report remaining depth (`U n R n`); comment toggling reports the affected line range; the title bar truncates long filenames with an ellipsis and turns into a solid **red bar** in read-only mode; the help bar truncates labels with an ellipsis on narrow terminals.
 
-**Configuration:** editor settings (tab size, indent style, spell, line numbers, syntax theme, log size) live in `~/.config/hed/config` — view or edit them with `hed config`. Three syntax themes are available: `catppuccin`, `dark`, and `light`. Status messages are logged to `~/.config/hed/log/` and shown with `hed log`.
+**Configuration:** editor settings (tab size, indent style, spell, line numbers, syntax theme, log size) live in `~/.config/hed/config` — view or edit them with `hed config`. Three syntax themes are built in (`catppuccin`, `dark`, `light`) and you can add your own without recompiling (see [Custom themes](#custom-themes)). Status messages are logged to `~/.config/hed/log/` and shown with `hed log`.
+
+### Custom themes
+
+Pick a theme with `hed config set theme NAME` or `HED_THEME=NAME`. Three are built in: `catppuccin` (default), `dark`, and `light`. To make your own:
+
+```bash
+hed theme create mytheme            # template from the current theme
+$EDITOR ~/.config/hed/themes/mytheme.theme
+hed config set theme mytheme        # or: HED_THEME=mytheme hed foo.py
+```
+
+`hed theme` lists every available theme (built-in + custom). Theme files are INI-style with a `[theme]` section; each key maps a highlight type to the numeric part of an SGR escape sequence (the editor wraps values in `ESC[<value>m`):
+
+```ini
+[theme]
+comment = 3;38;5;244    # italic + grey
+string  = 38;5;114      # 256-colour blue
+number  = 38;5;215
+```
+
+The recognised keys are `comment`, `string`, `number`, `keyword`, `type`, `builtin`, `function`, `variable`, `constant`, `tag`, `attr`, `preproc`, `escape`, `property`, `operator`. Missing keys fall back to catppuccin. If the selected theme file is missing or malformed, hed warns on stderr and falls back to catppuccin. A custom theme with the same name as a built-in overrides it.
 
 **Shell completions:** `make install` installs tab-completion for **bash**, **fish**, and **zsh** (all commands, options, languages, and theme values). `hed langs --help` lists the supported languages.
 

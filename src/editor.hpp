@@ -20,7 +20,7 @@ struct EditorOptions {
     bool pipeMode = false;  // buffer came from stdin and/or goes to stdout
     std::string initial;
     bool readOnly = false;
-    std::string theme = "catppuccin";  // syntax palette: catppuccin | dark | light
+    std::string theme = "catppuccin";  // syntax palette: built-in or a custom theme name
     size_t logSize = 100;              // status messages kept in memory / shown by 'hed log'; 0 = unlimited
 };
 
@@ -52,7 +52,7 @@ struct Config {
     int spaces = 4;                  // indent width when indent = 2 (spaces)
     bool spell = true;               // start with misspelling underlining on
     bool numbers = true;             // show the line-number gutter
-    std::string theme = "catppuccin";  // syntax palette: catppuccin | dark | light
+    std::string theme = "catppuccin";  // syntax palette: built-in or a custom theme name
     size_t logSize = 100;            // status messages kept in memory; 0 = unlimited
 };
 
