@@ -4,6 +4,7 @@ set -u
 H="${HED:-$(cd "$(dirname "$0")/.." && pwd)/hed}"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; cd "$T"
 export HOME="$T"   # isolate config/themes so tests never touch the real ~/.config/hed
+export XDG_CONFIG_HOME="$T/.config"  # hed honours XDG_CONFIG_HOME; pin it inside the sandbox too
 pass=0; failn=0
 ok()  { pass=$((pass+1)); }
 bad() { failn=$((failn+1)); echo "FAIL: $*"; }
