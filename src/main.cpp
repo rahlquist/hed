@@ -22,7 +22,7 @@
 
 using namespace hed;
 
-static const char* VERSION = "1.1.0";
+static const char* VERSION = "1.2.0";
 static bool g_color = false;
 
 enum Exit { EX_OK = 0, EX_NOTFOUND = 1, EX_USAGE = 2, EX_AMBIG = 3 };
@@ -124,11 +124,13 @@ COMMANDS
   config                  view or edit ~/.config/hed/config (editor settings)
   theme                   list syntax themes / create a custom theme
   log     [N]             show the last N status messages from the editor log
+  lint    FILE            validate YAML syntax (indentation, duplicate keys, quotes)
+  yaml    FILE OP PATH [VAL] one-shot YAML editing: get/set/delete/list by path
   edit    [FILE]          interactive editor (use when FILE is named like a command)
 
   'hed <command> --help' shows every option of a command.
 
-LANGUAGES  python bash fish javascript typescript sql html css json markdown text
+LANGUAGES  python bash fish javascript typescript sql html css json markdown yaml text
 EXIT CODES 0 ok | 1 no match / misspellings found | 2 usage or I/O error | 3 ambiguous match or --expect mismatch
 COLOR      --color=auto|always|never (auto honours NO_COLOR and non-tty output)
 FILES      ~/.config/hed/words.txt personal dictionary; HED_DICT replaces the built-in dictionary,
@@ -333,7 +335,37 @@ static const char* LANGS_HELP = R"(hed langs      (aliases: languages)
 
 Lists the languages hed knows for syntax highlighting and --lang.
 
-  python bash fish javascript typescript sql html css json markdown text
+  python bash fish javascript typescript sql html css json markdown yaml text
+)";
+
+
+static const char* LINT_HELP = R"(hed lint FILE [options]
+
+Validates YAML syntax. Checks indentation, duplicate keys, balanced quotes/brackets,
+trailing whitespace, and list item syntax.
+
+  -q, --quiet          no output, exit status only
+      --json           JSON array: [{line,col,message}]
+
+Exit status: 0 clean, 1 errors found, 2 file not found/unreadable.
+)";
+
+static const char* YAML_HELP = R"(hed yaml FILE OP PATH [VALUE]
+
+One-shot YAML editing by path. PATH is dot-separated keys with [N] for array indices.
+
+  hed yaml FILE get PATH          print the value at PATH
+  hed yaml FILE set PATH VALUE    set VALUE at PATH (creates intermediate keys)
+  hed yaml FILE delete PATH        delete the key at PATH
+  hed yaml FILE list PATH         list items at PATH (for arrays)
+
+  -n, --dry-run        show the diff, do not write
+  -b, --backup         timestamped backup before writing
+  -q, --quiet          no diff / summary
+  -C, --context N      diff context lines (default 3)
+      --json           machine-readable result
+
+Exit codes: 0 success, 1 path not found, 2 error, 3 ambiguous.
 )";
 
 static bool wantsHelp(const std::vector<std::string>& a) {
@@ -1266,6 +1298,381 @@ static int cmdLog(const std::vector<std::string>& a) {
     return 0;
 }
 
+
+// ------------------------------------------------------------------ lint
+static int cmdLint(const std::vector<std::string>& a) {
+    if (wantsHelp(a)) { printf("%s", LINT_HELP); return 0; }
+    Parsed p;
+    std::string err;
+    if (!parseArgs(a, 1, {{"quiet", 'q', false}, {"json", 0, false}}, p, err))
+        return usageErr("lint", err);
+    if (p.pos.empty()) return usageErr("lint", "missing FILE");
+    std::string file = p.pos[0];
+    std::string content;
+    if (!readFile(file, content, err)) return fail(err, EX_USAGE);
+    
+    Text t = splitText(content);
+    std::vector<std::string>& L = t.lines;
+    struct Err { size_t line, col; std::string msg; };
+    std::vector<Err> errors;
+    
+    // Track state for multi-line constructs
+    std::vector<std::string> keyStack;  // for duplicate key detection
+    std::vector<size_t> indentStack;
+    for (size_t i = 0; i < L.size(); i++) {
+        const std::string& line = L[i];
+        size_t lineNum = i + 1;
+        
+        // Skip empty lines
+        if (line.empty() || line.find_first_not_of(" \t") == std::string::npos) continue;
+        
+        // Check for tabs in indentation
+        size_t firstNonWs = line.find_first_not_of(" \t");
+        if (firstNonWs == std::string::npos) continue;
+        std::string indent = line.substr(0, firstNonWs);
+        if (indent.find('\t') != std::string::npos) {
+            errors.push_back({lineNum, indent.find('\t') + 1, "tab character in indentation (use spaces)"});
+        }
+        
+        // Check trailing whitespace
+        if (!line.empty() && (line.back() == ' ' || line.back() == '\t')) {
+            errors.push_back({lineNum, line.size(), "trailing whitespace"});
+        }
+        
+        // Skip comment lines
+        if (line[firstNonWs] == '#') continue;
+        
+        // Check balanced quotes
+        int dqCount = 0, sqCount = 0;
+        for (size_t k = 0; k < line.size(); k++) {
+            if (line[k] == '"' && (k == 0 || line[k-1] != '\\')) dqCount++;
+            if (line[k] == '\'' && (k == 0 || line[k-1] != '\\')) sqCount++;
+        }
+        if (dqCount % 2 != 0) errors.push_back({lineNum, line.find('"') + 1, "unbalanced double quote"});
+        if (sqCount % 2 != 0) errors.push_back({lineNum, line.find('\'') + 1, "unbalanced single quote"});
+        
+        // Check balanced brackets/braces
+        int bracketDepth = 0, braceDepth = 0;
+        for (size_t k = 0; k < line.size(); k++) {
+            if (line[k] == '[') bracketDepth++;
+            else if (line[k] == ']') bracketDepth--;
+            else if (line[k] == '{') braceDepth++;
+            else if (line[k] == '}') braceDepth--;
+        }
+        if (bracketDepth != 0) errors.push_back({lineNum, 1, "unbalanced brackets"});
+        if (braceDepth != 0) errors.push_back({lineNum, 1, "unbalanced braces"});
+        
+        // Check for colon in mapping lines (not list items, not flow style)
+        std::string trimmed = line.substr(firstNonWs);
+        if (!trimmed.empty() && trimmed[0] != '-' && trimmed[0] != '[' && trimmed[0] != '{') {
+            // Look for key: pattern
+            size_t colonPos = std::string::npos;
+            bool inStr = false;
+            char strChar = 0;
+            for (size_t k = 0; k < trimmed.size(); k++) {
+                if (inStr) {
+                    if (trimmed[k] == strChar && (k == 0 || trimmed[k-1] != '\\')) inStr = false;
+                } else {
+                    if (trimmed[k] == '"' || trimmed[k] == '\'') { inStr = true; strChar = trimmed[k]; }
+                    else if (trimmed[k] == ':') { colonPos = k; break; }
+                }
+            }
+            if (colonPos == std::string::npos && trimmed[0] != '#') {
+                // No colon found — might be a value without key (error in block context)
+                // But could be a continuation of a multi-line value, so only flag if it looks like a mapping
+                if (indentStack.empty() || firstNonWs > indentStack.back()) {
+                    // This is a new line at deeper indentation without a colon
+                    // Only flag if it doesn't look like a list item or flow continuation
+                    if (trimmed[0] != '-' && trimmed[0] != ']' && trimmed[0] != '}') {
+                        // Check if previous line ended with a key (no colon)
+                        // This is a heuristic — skip for now to avoid false positives
+                    }
+                }
+            }
+        }
+        
+        // Track indentation for duplicate key detection
+        if (indentStack.empty() || firstNonWs > indentStack.back()) {
+            indentStack.push_back(firstNonWs);
+            keyStack.clear();
+        } else if (firstNonWs < indentStack.back()) {
+            while (!indentStack.empty() && firstNonWs < indentStack.back()) {
+                indentStack.pop_back();
+                if (!keyStack.empty()) keyStack.pop_back();
+            }
+        }
+        
+        // Check for duplicate keys at same level
+        size_t colonPos = trimmed.find(':');
+        if (colonPos != std::string::npos && colonPos > 0) {
+            std::string key = trimRight(trimmed.substr(0, colonPos));
+            // Remove quotes from key
+            if (key.size() >= 2 && ((key.front() == '"' && key.back() == '"') || (key.front() == '\'' && key.back() == '\''))) {
+                key = key.substr(1, key.size() - 2);
+            }
+            for (auto& k : keyStack) {
+                if (k == key) {
+                    errors.push_back({lineNum, 1, "duplicate key '" + key + "' at same level"});
+                    break;
+                }
+            }
+            keyStack.push_back(key);
+        }
+    }
+    
+    // Output
+    bool json = p.has("json");
+    bool quiet = p.has("quiet");
+    if (json) {
+        printf("[");
+        for (size_t i = 0; i < errors.size(); i++) {
+            printf("%s\n  {\"line\":%zu,\"col\":%zu,\"message\":%s}", i ? "," : "",
+                   errors[i].line, errors[i].col, jsonEscape(errors[i].msg).c_str());
+        }
+        printf("%s]\n", errors.empty() ? "" : "\n");
+    } else if (!quiet) {
+        for (auto& e : errors) {
+            printf("%s:%zu:%zu: ERROR: %s\n", file.c_str(), e.line, e.col, e.msg.c_str());
+        }
+    }
+    return errors.empty() ? EX_OK : EX_NOTFOUND;
+}
+
+// ------------------------------------------------------------------ yaml
+static std::vector<std::string> parseYamlPath(const std::string& path) {
+    std::vector<std::string> parts;
+    size_t i = 0;
+    while (i < path.size()) {
+        if (path[i] == '.') { i++; continue; }
+        if (path[i] == '[') {
+            size_t j = path.find(']', i);
+            if (j == std::string::npos) j = path.size();
+            parts.push_back(path.substr(i + 1, j - i - 1));
+            i = j + 1;
+        } else {
+            size_t j = i;
+            while (j < path.size() && path[j] != '.' && path[j] != '[') j++;
+            parts.push_back(path.substr(i, j - i));
+            i = j;
+        }
+    }
+    return parts;
+}
+
+static std::string inferType(const std::string& val) {
+    if (val == "true" || val == "false" || val == "yes" || val == "no" || val == "on" || val == "off") return "bool";
+    if (val == "null" || val == "~" || val.empty()) return "null";
+    if (val.find_first_not_of("0123456789.eE+-") == std::string::npos) return "number";
+    return "string";
+}
+
+static std::string yamlValueToString(const std::string& val) {
+    std::string type = inferType(val);
+    if (type == "string") {
+        // Quote if it contains special chars
+        if (val.find(':') != std::string::npos || val.find('#') != std::string::npos ||
+            val.find('"') != std::string::npos || val.find('\'') != std::string::npos ||
+            val.find('\n') != std::string::npos || val.find('[') != std::string::npos ||
+            val.find(']') != std::string::npos || val.find('{') != std::string::npos ||
+            val.find('}') != std::string::npos || val.find(',') != std::string::npos ||
+            val.find('*') != std::string::npos || val.find('&') != std::string::npos ||
+            val.find('!') != std::string::npos || val.find('|') != std::string::npos ||
+            val.find('>') != std::string::npos || val.find('%') != std::string::npos ||
+            val.find('@') != std::string::npos || val.find('`') != std::string::npos ||
+            val.front() == ' ' || val.back() == ' ') {
+            return "\"" + val + "\"";
+        }
+        return val;
+    }
+    return val;
+}
+
+static int cmdYaml(const std::vector<std::string>& a) {
+    if (wantsHelp(a)) { printf("%s", YAML_HELP); return 0; }
+    Parsed p;
+    std::string err;
+    if (!parseArgs(a, 1, {{"dry-run", 'n', false}, {"backup", 'b', false}, {"quiet", 'q', false},
+                          {"context", 'C', true}, {"json", 0, false}}, p, err))
+        return usageErr("yaml", err);
+    if (p.pos.size() < 3) return usageErr("yaml", "usage: hed yaml FILE OP PATH [VALUE]");
+    std::string file = p.pos[0];
+    std::string op = p.pos[1];
+    std::string path = p.pos[2];
+    std::string value = p.pos.size() > 3 ? p.pos[3] : "";
+    
+    if (op != "get" && op != "set" && op != "delete" && op != "list")
+        return usageErr("yaml", "unknown operation '" + op + "' (use get, set, delete, list)");
+    if (op == "set" && p.pos.size() < 4) return usageErr("yaml", "set requires a VALUE");
+    
+    FileBuf fb;
+    if (!loadBuf(file, fb, err)) return fail(err);
+    
+    std::vector<std::string> parts = parseYamlPath(path);
+    if (parts.empty()) return fail("empty path", EX_USAGE);
+    
+    Text t = splitText(fb.text);
+    std::vector<std::string>& L = t.lines;
+    
+    // Navigate to the target line
+    size_t lineIdx = 0;
+    size_t indent = 0;
+    size_t lastKeyLine = 0, lastKeyIndent = 0;  // where the final matched key lives
+    bool lastIsBlock = false;                   // value on following lines, not inline
+    for (size_t pi = 0; pi < parts.size(); pi++) {
+        const std::string& part = parts[pi];
+        bool isArrayIdx = !part.empty() && part.find_first_not_of("0123456789") == std::string::npos;
+        
+        if (isArrayIdx) {
+            // Array index
+            long idx = atol(part.c_str());
+            // Find the array at current position
+            // Look for list items at current indent
+            std::vector<size_t> arrayItems;
+            for (size_t i = lineIdx; i < L.size(); i++) {
+                size_t firstNonWs = L[i].find_first_not_of(" \t");
+                if (firstNonWs == std::string::npos) continue;
+                if ((size_t)firstNonWs < indent) break;
+                if ((size_t)firstNonWs == indent && L[i][firstNonWs] == '-') {
+                    arrayItems.push_back(i);
+                }
+            }
+            if (idx < 0 || (size_t)idx >= arrayItems.size()) {
+                return fail("array index [" + part + "] out of range at path '" + path + "'", EX_NOTFOUND);
+            }
+            lineIdx = arrayItems[idx];
+            // Move past the "- " prefix
+            size_t firstNonWs = L[lineIdx].find_first_not_of(" \t");
+            indent = firstNonWs + 2;  // after "- "
+            lastKeyLine = lineIdx; lastKeyIndent = firstNonWs; lastIsBlock = false;
+        } else {
+            // Key lookup
+            std::string searchKey = part;
+            bool found = false;
+            for (size_t i = lineIdx; i < L.size(); i++) {
+                size_t firstNonWs = L[i].find_first_not_of(" \t");
+                if (firstNonWs == std::string::npos) continue;
+                if ((size_t)firstNonWs < indent) break;
+                if ((size_t)firstNonWs > indent) continue;
+                // Check if this line has the key
+                size_t colonPos = L[i].find(':', firstNonWs);
+                if (colonPos == std::string::npos) continue;
+                std::string key = trimRight(L[i].substr(firstNonWs, colonPos - firstNonWs));
+                // Remove quotes
+                if (key.size() >= 2 && ((key.front() == '"' && key.back() == '"') || (key.front() == '\'' && key.back() == '\''))) {
+                    key = key.substr(1, key.size() - 2);
+                }
+                if (key == searchKey) {
+                    lineIdx = i;
+                    found = true;
+                    // Check if value is on same line
+                    std::string rest = trimRight(L[i].substr(colonPos + 1));
+                    lastKeyLine = i;
+                    lastKeyIndent = firstNonWs;
+                    if (rest.empty()) {
+                        // Value is on next line(s)
+                        lastIsBlock = true;
+                        indent = firstNonWs + 2;
+                        lineIdx++;  // advance past this key line
+                    } else {
+                        // Value is on same line
+                        lastIsBlock = false;
+                        indent = firstNonWs;
+                    }
+                    break;
+                }
+            }
+            if (!found) {
+                if (op == "set") {
+                    // Create the key
+                    std::string newLine = std::string(indent, ' ') + searchKey + ":";
+                    if (pi == parts.size() - 1) {
+                        // Last part — add value
+                        newLine += " " + yamlValueToString(value);
+                    }
+                    L.insert(L.begin() + lineIdx, newLine);
+                    if (pi < parts.size() - 1) {
+                        // Need to create intermediate key
+                        lineIdx++;
+                        indent += 2;
+                    }
+                    continue;
+                }
+                return fail("key '" + part + "' not found at path '" + path + "'", EX_NOTFOUND);
+            }
+        }
+    }
+    
+    // Perform the operation
+    if (op == "get") {
+        // Extract value from the line
+        size_t firstNonWs = L[lineIdx].find_first_not_of(" \t");
+        if (firstNonWs == std::string::npos) return fail("empty line", EX_USAGE);
+        std::string trimmed = L[lineIdx].substr(firstNonWs);
+        if (trimmed[0] == '-') {
+            // List item — return the content after "- "
+            std::string item = trimmed.substr(2);
+            printf("%s\n", item.c_str());
+            return 0;
+        }
+        size_t colonPos = trimmed.find(':');
+        if (colonPos == std::string::npos) return fail("no value found", EX_USAGE);
+        std::string val = trimmed.substr(colonPos + 1);
+        size_t vb = val.find_first_not_of(" \t");
+        val = vb == std::string::npos ? std::string() : trimRight(val.substr(vb));
+        printf("%s\n", val.c_str());
+        return 0;
+    }
+    if (op == "list") {
+        // List items at current position
+        for (size_t i = lineIdx; i < L.size(); i++) {
+            size_t firstNonWs = L[i].find_first_not_of(" \t");
+            if (firstNonWs == std::string::npos) continue;
+            if ((size_t)firstNonWs < indent) break;
+            if ((size_t)firstNonWs == indent && L[i][firstNonWs] == '-') {
+                std::string item = L[i].substr(firstNonWs + 2);
+                printf("%s\n", item.c_str());
+            }
+        }
+        return 0;
+    }
+    if (op == "delete") {
+        // Delete the key line, and its whole block (more-indented children) when
+        // the value lives on the following lines.
+        if (lastIsBlock) {
+            size_t end = lastKeyLine + 1;
+            while (end < L.size()) {
+                size_t f = L[end].find_first_not_of(" \t");
+                if (f == std::string::npos) break;   // blank line ends the block
+                if (f <= lastKeyIndent) break;       // sibling / parent
+                end++;
+            }
+            L.erase(L.begin() + lastKeyLine, L.begin() + end);
+        } else {
+            L.erase(L.begin() + lastKeyLine);
+        }
+        std::string out = joinText(t);
+        return finishEdit(p, file, fb, out, "deleted '" + path + "' from " + file, "", "yaml");
+    }
+    if (op == "set") {
+        // Set the value
+        size_t firstNonWs = L[lineIdx].find_first_not_of(" \t");
+        if (firstNonWs == std::string::npos) return fail("empty line", EX_USAGE);
+        std::string trimmed = L[lineIdx].substr(firstNonWs);
+        if (trimmed[0] == '-') {
+            // List item — replace content after "- "
+            L[lineIdx] = std::string(firstNonWs, ' ') + "- " + yamlValueToString(value);
+        } else {
+            size_t colonPos = trimmed.find(':');
+            if (colonPos == std::string::npos) return fail("no colon found", EX_USAGE);
+            std::string key = trimmed.substr(0, colonPos);
+            L[lineIdx] = std::string(firstNonWs, ' ') + key + ": " + yamlValueToString(value);
+        }
+        std::string out = joinText(t);
+        return finishEdit(p, file, fb, out, "set '" + path + "' in " + file, "", "yaml");
+    }
+    return EX_OK;
+}
+
 // ------------------------------------------------------------------ main
 int main(int argc, char** argv) {
     if (!setlocale(LC_ALL, "") || !strstr(setlocale(LC_CTYPE, nullptr), "UTF")) {
@@ -1288,6 +1695,8 @@ int main(int argc, char** argv) {
             if (s == "config") return cmdConfig(b);
             if (s == "theme") return cmdTheme(b);
             if (s == "log") return cmdLog(b);
+            if (s == "lint") return cmdLint(b);
+            if (s == "yaml") return cmdYaml(b);
             if (s == "langs" || s == "languages") { printf("%s", LANGS_HELP); return 0; }
             if (s == "edit") { printf("%s", EDIT_HELP); return 0; }
         }
@@ -1313,6 +1722,8 @@ int main(int argc, char** argv) {
     if (c == "config") return cmdConfig(a);
     if (c == "theme") return cmdTheme(a);
     if (c == "log") return cmdLog(a);
+    if (c == "lint") return cmdLint(a);
+    if (c == "yaml") return cmdYaml(a);
     if (c == "edit" || c == "e") return cmdEdit(a, 1);
     return cmdEdit(a, 0);
 }

@@ -2,9 +2,9 @@
 _hed() {
     local cur prev cmd
     cur="${COMP_WORDS[COMP_CWORD]}"; prev="${COMP_WORDS[COMP_CWORD-1]}"; cmd="${COMP_WORDS[1]}"
-    local cmds="write show search replace insert delete spell langs config theme log edit help"
+    local cmds="write show search replace insert delete spell langs config theme log lint yaml edit help"
     case "$prev" in
-        -l|--lang) COMPREPLY=($(compgen -W "python bash fish javascript typescript sql html css json markdown text" -- "$cur")); return;;
+        -l|--lang) COMPREPLY=($(compgen -W "python bash fish javascript typescript sql html css json markdown yaml text" -- "$cur"));;
         --color) COMPREPLY=($(compgen -W "auto always never" -- "$cur")); return;;
     esac
     if [[ $COMP_CWORD -eq 1 ]]; then
@@ -21,7 +21,9 @@ _hed() {
             delete)  opts+=" --range --lines --match --regex --all --dry-run --backup --context --quiet --json";;
             spell)   opts+=" --lang --all-text --suggest --words --add --json --quiet";;
             config)  opts+=" --help";;
-            log)     opts+=" --lines --help";;
+            log)     opts+=" --lines";;
+            lint)    opts+=" --quiet --json";;
+            yaml)    opts+=" --dry-run --backup --quiet --context --json";;pts+=" --lines --help";;
             edit)    opts+=" --tabsize --tabs --spaces --no-spell --no-numbers --readonly --line --log-size";;
         esac
         COMPREPLY=($(compgen -W "$opts" -- "$cur")); return

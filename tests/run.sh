@@ -97,5 +97,21 @@ check "config set does not bake env" bash -c "! grep -q '^tabsize = 8' \"$HOME/.
 $H write mm.txt -q -m 999 -c x 2>/dev/null; check "write rejects bad mode" test $? -eq 2
 $H edit rng.txt --tabsize 0 </dev/null 2>&1 | grep -q 'tabsize'; check "edit rejects bad tabsize" test $? -eq 0
 
+
+# YAML support
+printf 'services:\n  web:\n    image: nginx\n    ports:\n      - 80:80\n' > t.yaml
+check "yaml lang detect" bash -c "$H show t.yaml -l yaml --color=never | grep -q 'services'"
+check "yaml lint clean" bash -c "$H lint t.yaml -q; test \$? -eq 0"
+printf 'key: value\nkey: dup\n' > bad.yaml
+check "yaml lint dup key" bash -c "$H lint bad.yaml -q 2>/dev/null; test \$? -eq 1"
+check "yaml lint json" bash -c "$H lint bad.yaml --json | grep -q 'duplicate'"
+check "yaml get" test "$($H yaml t.yaml get services.web.image)" = "nginx"
+check "yaml set" bash -c "$H yaml t.yaml set services.web.image redis -q; grep -q 'image: redis' t.yaml"
+check "yaml list" bash -c "$H yaml t.yaml list services.web.ports | grep -q '80:80'"
+check "yaml delete" bash -c "$H yaml t.yaml delete services.web.ports -q; grep -q 'ports' t.yaml; test \$? -eq 1"
+check "yaml set new key" bash -c "$H yaml t.yaml set services.web.restart always -q; grep -q 'restart: always' t.yaml"
+check "yaml get missing" bash -c "$H yaml t.yaml get services.web.nope 2>/dev/null; test \$? -eq 1"
+check "yaml spell" bash -c "$H spell t.yaml -q 2>/dev/null; test \$? -eq 0"
+
 echo "passed: $pass  failed: $failn"
 [ $failn -eq 0 ]

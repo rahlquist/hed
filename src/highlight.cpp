@@ -153,6 +153,15 @@ std::vector<LangDef> buildDefs() {
         l.filenames = {"README", "CHANGELOG"};
         d.push_back(l);
     }
+    {
+        LangDef l; l.id = L_YAML; l.name = "yaml"; l.aliases = {"yml"}; l.exts = {"yaml", "yml"};
+        l.filenames = {"docker-compose.yml", "docker-compose.yaml", ".gitlab-ci.yml", ".travis.yml",
+                       ".github", "Makefile", "makefile", "GNUmakefile"};
+        l.lineComments = {"#"}; l.icase = true;
+        l.kw = W("true false yes no on off null");
+        l.consts = W("True False Yes No On Off Null NULL ~");
+        d.push_back(l);
+    }
     return d;
 }
 
@@ -723,6 +732,143 @@ void hlMarkdown(const std::string& s, HlState& st, std::vector<uint8_t>& hl) {
     }
 }
 
+
+// ------------------------------------------------------------------ YAML
+enum { Y_NORMAL = 0, Y_COMMENT, Y_DQ, Y_SQ, Y_BLOCK, Y_FLOW };
+
+void hlYaml(const std::string& s, HlState& st, std::vector<uint8_t>& hl) {
+    size_t e = s.size(), i = 0;
+    // Skip leading whitespace
+    while (i < e && (s[i] == ' ' || s[i] == '\t')) i++;
+    // Full-line comment
+    if (i < e && s[i] == '#') { fill(hl, i, e, H_COMMENT); return; }
+    // Multi-line string continuation (| or >)
+    if (st.mode == Y_BLOCK) {
+        // Block scalar: consume until dedent or end
+        size_t blockStart = i;
+        while (i < e && (s[i] == ' ' || s[i] == '\t')) i++;
+        if (i == e) { fill(hl, blockStart, e, H_STRING); return; }
+        // Check if still indented (part of block)
+        if (i > 0 && s[i-1] == ' ') {
+            fill(hl, blockStart, e, H_STRING);
+            return;
+        }
+        st.mode = Y_NORMAL;
+    }
+    while (i < e) {
+        if (st.mode == Y_COMMENT) {
+            fill(hl, i, e, H_COMMENT);
+            return;
+        }
+        if (st.mode == Y_DQ) {
+            while (i < e) {
+                if (s[i] == '\\' && i + 1 < e) { hl[i] = hl[i+1] = H_ESCAPE; i += 2; continue; }
+                hl[i] = H_STRING;
+                if (s[i++] == '"') { st.mode = Y_NORMAL; break; }
+            }
+            continue;
+        }
+        if (st.mode == Y_SQ) {
+            while (i < e) {
+                hl[i] = H_STRING;
+                if (s[i++] == '\'') {
+                    if (i < e && s[i] == '\'') { hl[i] = H_STRING; i++; }
+                    else { st.mode = Y_NORMAL; break; }
+                }
+            }
+            continue;
+        }
+        unsigned char c = (unsigned char)s[i];
+        // Comment (space + # or start + #)
+        if (c == '#' && (i == 0 || s[i-1] == ' ' || s[i-1] == '\t')) {
+            fill(hl, i, e, H_COMMENT);
+            return;
+        }
+        // Double-quoted string
+        if (c == '"') { st.mode = Y_DQ; hl[i++] = H_STRING; continue; }
+        // Single-quoted string
+        if (c == '\'') { st.mode = Y_SQ; hl[i++] = H_STRING; continue; }
+        // Flow style { } [ ]
+        if (c == '{' || c == '[') { st.mode = Y_FLOW; hl[i++] = H_OPERATOR; continue; }
+        if (c == '}' || c == ']') { st.mode = Y_NORMAL; hl[i++] = H_OPERATOR; continue; }
+        // List item
+        if (c == '-' && i + 1 < e && (s[i+1] == ' ' || s[i+1] == '\t')) {
+            fill(hl, i, i + 1, H_OPERATOR);
+            i++;
+            continue;
+        }
+        // Key: value  (colon after identifier)
+        if (isIdStart(c)) {
+            size_t j = i;
+            while (j < e && (isIdChar((unsigned char)s[j]) || s[j] == '-')) j++;
+            // Check if followed by colon (making it a key)
+            size_t k = j;
+            while (k < e && s[k] == ' ') k++;
+            if (k < e && s[k] == ':') {
+                fill(hl, i, j, H_PROPERTY);
+                i = j;
+                continue;
+            }
+            // Not a key — check for keywords/constants
+            std::string w = s.substr(i, j - i);
+            std::string lw = toLower(w);
+            if (st.mode != Y_FLOW) {
+                if (lw == "true" || lw == "false" || lw == "yes" || lw == "no" || lw == "on" || lw == "off") {
+                    fill(hl, i, j, H_CONSTANT); i = j; continue;
+                }
+                if (lw == "null" || w == "~") {
+                    fill(hl, i, j, H_CONSTANT); i = j; continue;
+                }
+            }
+            // Number?
+            if (isdigit(c)) {
+                size_t k = j;
+                while (k < e && (isalnum((unsigned char)s[k]) || s[k] == '.' || s[k] == '-' || s[k] == '+')) k++;
+                fill(hl, i, k, H_NUMBER);
+                i = k;
+                continue;
+            }
+            i = j;
+            continue;
+        }
+        // Number at start
+        if (isdigit(c)) {
+            size_t j = i;
+            while (j < e && (isalnum((unsigned char)s[j]) || s[j] == '.' || s[j] == '-' || s[j] == '+')) j++;
+            fill(hl, i, j, H_NUMBER);
+            i = j;
+            continue;
+        }
+        // Anchors & aliases
+        if (c == '&' || c == '*') {
+            size_t j = i + 1;
+            while (j < e && isIdChar((unsigned char)s[j])) j++;
+            fill(hl, i, j, H_VARIABLE);
+            i = j;
+            continue;
+        }
+        // Tags !!str !!int etc
+        if (c == '!' && i + 1 < e && s[i+1] == '!') {
+            size_t j = i + 2;
+            while (j < e && isIdChar((unsigned char)s[j])) j++;
+            fill(hl, i, j, H_TAG);
+            i = j;
+            continue;
+        }
+        // Block scalar indicators | and >
+        if (c == '|' || c == '>') {
+            size_t j = i + 1;
+            while (j < e && (s[j] == ' ' || s[j] == '\t')) j++;
+            if (j < e && (isdigit((unsigned char)s[j]) || s[j] == '+' || s[j] == '-')) j++;
+            fill(hl, i, j, H_PREPROC);
+            st.mode = Y_BLOCK;
+            i = j;
+            continue;
+        }
+        i++;
+    }
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------ public API
@@ -813,6 +959,7 @@ void highlightLine(LangId id, const std::string& line, HlState& st, std::vector<
         case L_HTML: hlHtml(line, st, hl); return;
         case L_CSS: hlCss(line, 0, line.size(), st, hl); return;
         case L_MARKDOWN: hlMarkdown(line, st, hl); return;
+        case L_YAML: hlYaml(line, st, hl); return;
         default: hlGeneric(def(id), line, 0, line.size(), st, hl); return;
     }
 }
@@ -1002,6 +1149,7 @@ bool spellRegion(LangId id, uint8_t h) {
         case L_MARKDOWN: return h == H_NORMAL || h == H_KEYWORD || h == H_COMMENT || h == H_OPERATOR;
         case L_HTML: return h == H_NORMAL || h == H_COMMENT;
         case L_JSON: return h == H_STRING;
+        case L_YAML: return h == H_COMMENT || h == H_STRING;
         default: return h == H_COMMENT || h == H_STRING;
     }
 }

@@ -14,7 +14,7 @@
 2. **Agent-friendly one-shot tool** — `show`, `search`, `replace`, `insert`, `delete`, and `spell`. Never prompts, prints a unified diff of every change, refuses ambiguous edits, and uses meaningful exit codes for scripting.
 3. **Nano-style editor** — `hed FILE` opens a full-screen editor with syntax highlighting, live search, replace, undo/redo, mark/cut/paste, comment toggling, and an interactive spell checker. `cmd | hed | cmd2` works like `vipe`.
 
-**Syntax highlighting:** Python, Bash/sh/zsh (including heredoc bodies), fish, JavaScript, TypeScript, SQL, HTML (with embedded `<script>`/`<style>`), CSS/SCSS, JSON, Markdown.
+**Syntax highlighting:** Python, Bash/sh/zsh (including heredoc bodies), fish, JavaScript, TypeScript, SQL, HTML (with embedded `<script>` / `<style>` ), CSS/SCSS, JSON, Markdown, YAML.
 
 **Spell checking:** 82,834-word SymSpell frequency dictionary embedded in the binary, with suggestion ranking by edit distance + word frequency, suffix/prefix awareness, contraction handling, a built-in tech vocabulary, and a personal dictionary. In code, only comments and string literals are checked — identifiers, paths, URLs, camelCase, and ACRONYMS are skipped.
 
@@ -106,6 +106,29 @@ hed delete app.py --range 88:90
 hed spell README.md
 git log -1 --format=%B | hed spell
 ```
+
+### YAML support
+
+```bash
+# Syntax highlighting
+hed show config.yaml -n
+
+# Linting
+hed lint config.yaml                    # validates syntax
+hed lint config.yaml --json             # JSON output
+hed lint config.yaml -q                 # exit code only
+
+# One-shot editing by path
+hed yaml config.yaml get services.web.image
+hed yaml config.yaml set services.web.image redis
+hed yaml config.yaml delete services.web.ports
+hed yaml config.yaml list services.web.ports
+hed yaml config.yaml set services.web.restart always   # creates key if missing
+```
+
+Path syntax: dot-separated keys, `[N]` for array indices (e.g., `services.web.ports[0]`).
+`set` infers types (string, int, float, bool, null) and preserves formatting.
+Exit codes: 0 success, 1 path not found, 2 error.
 
 ### Pipe mode
 

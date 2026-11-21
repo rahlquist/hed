@@ -2,11 +2,11 @@
 # zsh completion for hed  (SPDX-License-Identifier: MIT)
 # Install to /usr/share/zsh/site-functions/_hed (or add to fpath).
 
-_hed_langs=(python bash fish javascript typescript sql html css json markdown text)
+_hed_langs=(python bash fish javascript typescript sql html css json markdown yaml text)
 
 _hed() {
   local -a cmds
-  cmds=(write show search replace insert delete spell langs config theme log edit help)
+  cmds=(write show search replace insert delete spell langs config theme log lint yaml edit help)
   if (( CURRENT == 2 )); then
     _describe 'command' cmds
     _files
@@ -24,6 +24,8 @@ _hed() {
     spell)   opts=(--lang --all-text --suggest --words --add --json --quiet);;
     config)  opts=(get set);;
     log)     opts=(--lines);;
+    lint)    opts=(--quiet --json);;
+    yaml)    opts=(--dry-run --backup --quiet --context --json);;
     edit)    opts=(--tabsize --tabs --spaces --no-spell --no-numbers --readonly --line --log-size);;
     *)       opts=(--help --color --lang);;
   esac

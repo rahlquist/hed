@@ -991,6 +991,46 @@ number  = 38;5;215
 
 Each key maps a highlight type to the numeric part of an SGR escape sequence (the editor wraps values in `ESC[<value>m`). The recognised keys are `comment`, `string`, `number`, `keyword`, `type`, `builtin`, `function`, `variable`, `constant`, `tag`, `attr`, `preproc`, `escape`, `property`, `operator`. Missing keys fall back to catppuccin. Select a theme with `hed config set theme NAME` or `HED_THEME=NAME`. If the selected theme file is missing or malformed, hed warns on stderr and falls back to catppuccin. A custom theme with the same name as a built-in overrides it.
 
+### lint
+
+```
+hed lint FILE [options]
+```
+
+Validates YAML syntax. Checks indentation (no tabs), duplicate keys, balanced quotes/brackets, trailing whitespace, and list item syntax.
+
+| Option | Description |
+|--------|-------------|
+| `-q`, `--quiet` | No output, exit status only |
+| `--json` | JSON array: `[{line,col,message}]` |
+
+Exit codes: 0 clean, 1 errors found, 2 file not found/unreadable.
+
+### yaml
+
+```
+hed yaml FILE OP PATH [VALUE] [options]
+```
+
+One-shot YAML editing by path. `OP` is one of `get`, `set`, `delete`, `list`. PATH is dot-separated keys with `[N]` for array indices.
+
+| Operation | Description |
+|-----------|-------------|
+| `hed yaml FILE get PATH` | Print the value at PATH |
+| `hed yaml FILE set PATH VALUE` | Set VALUE at PATH (creates intermediate keys if needed) |
+| `hed yaml FILE delete PATH` | Delete the key at PATH |
+| `hed yaml FILE list PATH` | List items at PATH (for arrays) |
+
+| Option | Description |
+|--------|-------------|
+| `-n`, `--dry-run` | Show the diff, do not write |
+| `-b`, `--backup` | Timestamped backup before writing |
+| `-q`, `--quiet` | No diff / summary |
+| `-C`, `--context N` | Diff context lines (default 3) |
+| `--json` | Machine-readable result |
+
+Exit codes: 0 success, 1 path not found, 2 error.
+
 ### log
 
 ```

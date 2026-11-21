@@ -12,7 +12,7 @@ enum Hl : uint8_t {
     H_VARIABLE, H_CONSTANT, H_TAG, H_ATTR, H_PREPROC, H_ESCAPE, H_PROPERTY, H_OPERATOR
 };
 
-enum LangId { L_TEXT, L_PYTHON, L_BASH, L_FISH, L_JS, L_TS, L_SQL, L_HTML, L_CSS, L_JSON, L_MARKDOWN, L_COUNT };
+enum LangId { L_TEXT, L_PYTHON, L_BASH, L_FISH, L_JS, L_TS, L_SQL, L_HTML, L_CSS, L_JSON, L_MARKDOWN, L_YAML, L_COUNT };
 
 // Highlighter state carried from the end of one line to the start of the next.
 struct HlState {
