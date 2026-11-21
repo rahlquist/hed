@@ -72,6 +72,29 @@ check "HED_THEME custom" test "$(HED_THEME=mytest $H config get theme)" = mytest
 $H theme create catppuccin >/dev/null 2>&1   # allowed: overrides the built-in
 check "override builtin allowed" test -f "$HOME/.config/hed/themes/catppuccin.theme"
 check "override listed as custom" bash -c "$H theme | grep -q 'overrides built-in'"
+$H theme create fromcustom >/dev/null 2>&1   # current theme is custom (mytest): exercises themeTemplate's custom path
+check "theme create from custom current" test -f "$HOME/.config/hed/themes/fromcustom.theme"
+
+# --- regression: audit fixes ---
+printf 'a\nb\nc\n' > rng.txt
+check "range huge +N clamps to end" test "$($H show rng.txt -r '1:+99999999999999999999' --color=never)" = $'a\nb\nc'
+$H search b rng.txt -C -1 >/dev/null 2>&1; check "search rejects negative context" test $? -eq 2
+$H search b rng.txt -m -1 >/dev/null 2>&1; check "search rejects negative max" test $? -eq 2
+cp rng.txt rc.txt; $H replace rc.txt a z -C abc >/dev/null 2>&1; check "replace rejects bad context" test $? -eq 2
+mkdir -p bk; printf 'one\ntwo\n' > bk/f.txt
+$H replace bk/f.txt one 1 -b -q; $H replace bk/f.txt two 2 -b -q
+check "same-second backups not clobbered" test "$(ls bk | grep -c -- '-f.txt')" -eq 2
+printf 'x\n' > ins.txt; printf '\n' | $H insert ins.txt --start -q
+check "insert blank line from stdin" bash -c "test \"\$(head -1 ins.txt)\" = '' && test \$(wc -l < ins.txt) -eq 2"
+printf 'teh recieve\n' > wj.txt
+check "spell words+json no stray array" bash -c "! $H spell wj.txt --words --json | grep -q '^\\['"
+printf 'abc' > nonl.txt; $H show nonl.txt -n --color=never > nonl.out
+check "show -n preserves missing EOL" bash -c "test \"\$(tail -c1 nonl.out | od -An -c | tr -d ' ')\" != '\\n'"
+printf 'hello\n' | HED_DICT=/nonexistent/x $H spell >/dev/null 2>&1; check "bad HED_DICT errors" test $? -eq 2
+HED_TABSIZE=8 $H config set theme dark >/dev/null 2>&1
+check "config set does not bake env" bash -c "! grep -q '^tabsize = 8' \"$HOME/.config/hed/config\""
+$H write mm.txt -q -m 999 -c x 2>/dev/null; check "write rejects bad mode" test $? -eq 2
+$H edit rng.txt --tabsize 0 </dev/null 2>&1 | grep -q 'tabsize'; check "edit rejects bad tabsize" test $? -eq 0
 
 echo "passed: $pass  failed: $failn"
 [ $failn -eq 0 ]

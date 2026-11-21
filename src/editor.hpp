@@ -57,7 +57,7 @@ struct Config {
 };
 
 std::string configFilePath();  // ~/.config/hed/config (honours $XDG_CONFIG_HOME)
-Config loadConfig();           // defaults, then the config file, then HED_* env vars
+Config loadConfig(bool applyEnv = true);  // defaults, then the config file, then (optionally) HED_* env vars
 bool saveConfig(const Config& c, std::string& err);  // writes a well-commented file
 
 int runEditor(const EditorOptions& o);

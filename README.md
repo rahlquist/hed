@@ -16,7 +16,7 @@
 
 **Syntax highlighting:** Python, Bash/sh/zsh (including heredoc bodies), fish, JavaScript, TypeScript, SQL, HTML (with embedded `<script>`/`<style>`), CSS/SCSS, JSON, Markdown.
 
-**Spell checking:** 82,765-word SymSpell frequency dictionary embedded in the binary, with suggestion ranking by edit distance + word frequency, suffix/prefix awareness, contraction handling, a built-in tech vocabulary, and a personal dictionary. In code, only comments and string literals are checked — identifiers, paths, URLs, camelCase, and ACRONYMS are skipped.
+**Spell checking:** 82,834-word SymSpell frequency dictionary embedded in the binary, with suggestion ranking by edit distance + word frequency, suffix/prefix awareness, contraction handling, a built-in tech vocabulary, and a personal dictionary. In code, only comments and string literals are checked — identifiers, paths, URLs, camelCase, and ACRONYMS are skipped.
 
 **No runtime dependencies:** no ncurses, no hunspell, no data files.
 
@@ -56,7 +56,7 @@ flowchart LR
 
 ```bash
 make                 # build ./hed
-make test            # run the test suite (32 shell checks + 12 PTY editor tests)
+make test            # run the test suite (53 shell checks + 21 PTY editor tests)
 sudo make install    # install to /usr/local/bin/hed + bash, fish & zsh completions
 make static          # fully static, stripped binary — Linux only
 ```

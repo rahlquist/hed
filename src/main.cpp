@@ -183,6 +183,7 @@ Prints files (or stdin) with syntax highlighting when stdout is a terminal.
 static const char* SEARCH_HELP = R"(hed search PATTERN [FILE...] [options]      (aliases: grep, find)
 
 Literal search by default. Reads stdin when no FILE is given. Output: [FILE:]LINE:COL:TEXT
+LINE and COL are 1-based; COL is a byte offset (not a display column).
 
   -E, --regex          PATTERN is an ECMAScript regular expression
   -i, --ignore-case    case-insensitive
@@ -250,6 +251,7 @@ static const char* SPELL_HELP = R"(hed spell [FILE...] [options]
 Spell-checks files or stdin. In source code only comments and string literals are
 checked; identifiers, paths, URLs, camelCase and ACRONYMS are skipped. Markdown/text/
 HTML text content is checked fully. Output: [FILE:]LINE:COL: word -> suggestions
+LINE and COL are 1-based; COL is a byte offset (not a display column).
 
   -l, --lang LANG      force language
   -a, --all-text       check every word, ignoring code structure
@@ -426,7 +428,6 @@ static std::string showText(const std::string& content, LangId lang, bool number
             out += renderAnsi(L[i], hl, &u);
         } else out += L[i];
         if (i + 1 < L.size() || t.trailingNewline) out += '\n';
-        else if (number) out += '\n';
     }
     return out;
 }
@@ -452,8 +453,9 @@ static int cmdWrite(const std::vector<std::string>& a) {
     if (file == "-") { writeAll(1, content); return 0; }
     int mode = -1;
     if (p.has("mode")) {
+        std::string modeStr = p.get("mode");  // keep alive: strtol's end pointer must not dangle
         char* e = nullptr;
-        long m = strtol(p.get("mode").c_str(), &e, 8);
+        long m = strtol(modeStr.c_str(), &e, 8);
         if (!e || *e || m < 0 || m > 07777) return usageErr("write", "bad --mode (octal, e.g. 644 or 0755)");
         mode = (int)m;
     }
@@ -556,8 +558,8 @@ static int cmdSearch(const std::vector<std::string>& a) {
     bool icase = p.has("ignore-case") || (p.has("smart-case") && !hasUpper(pat));
     bool re = p.has("regex") && !p.has("fixed"), word = p.has("word");
     long ctx = 0, maxN = -1;
-    if (p.has("context") && !parseInt(p.get("context"), ctx)) return usageErr("search", "bad --context");
-    if (p.has("max") && !parseInt(p.get("max"), maxN)) return usageErr("search", "bad --max");
+    if (p.has("context") && (!parseInt(p.get("context"), ctx) || ctx < 0)) return usageErr("search", "bad --context (expected a non-negative integer)");
+    if (p.has("max") && (!parseInt(p.get("max"), maxN) || maxN < 0)) return usageErr("search", "bad --max (expected a non-negative integer)");
     std::regex rx;
     if (re) {
         try {
@@ -672,9 +674,10 @@ static std::string toDisk(const FileBuf& fb, const std::string& text) {
 }
 
 static int finishEdit(const Parsed& p, const std::string& file, const FileBuf& fb, const std::string& newText,
-                      const std::string& summary, const std::string& jsonExtra) {
+                      const std::string& summary, const std::string& jsonExtra, const char* cmd) {
     long ctx = 3;
-    if (p.has("context")) parseInt(p.get("context"), ctx);
+    if (p.has("context") && (!parseInt(p.get("context"), ctx) || ctx < 0))
+        return usageErr(cmd, "bad --context (expected a non-negative integer)");
     bool dry = p.has("dry-run"), quiet = p.has("quiet"), json = p.has("json");
     std::string backup, err;
     bool changed = newText != fb.text;
@@ -828,7 +831,7 @@ static int cmdReplace(const std::vector<std::string>& a) {
     out += text.substr(last);
     return finishEdit(p, file, fb, out,
                       "replaced " + plural(sel.size(), "occurrence") + " in " + file + " (line " + lineList + ")",
-                      ",\"replacements\":" + std::to_string(sel.size()) + ",\"lines\":[" + lineList + "]");
+                      ",\"replacements\":" + std::to_string(sel.size()) + ",\"lines\":[" + lineList + "]", "replace");
 }
 
 // ------------------------------------------------------------------ insert
@@ -891,8 +894,10 @@ static int cmdInsert(const std::vector<std::string>& a) {
     std::string text;
     bool inl;
     if (!getText(p, text, err, inl)) return fail(err);
-    if (!text.empty() && text.back() == '\n') text.pop_back();
-    if (text.empty() && !inl) return fail("nothing to insert (empty input)");
+    bool hadNl = !text.empty() && text.back() == '\n';
+    if (hadNl) text.pop_back();
+    // A lone trailing newline is a single blank line, not "empty input".
+    if (text.empty() && !inl && !hadNl) return fail("nothing to insert (empty input)");
     if (p.has("match-indent")) {
         std::string ind = anchor >= 0 && (size_t)anchor < n ? leadingWs(L[(size_t)anchor]) : "";
         std::string d = dedent(text + "\n");
@@ -907,7 +912,7 @@ static int cmdInsert(const std::vector<std::string>& a) {
     if (L.size() && n == 0) t.trailingNewline = true;
     std::string out = joinText(t);
     return finishEdit(p, file, fb, out, "inserted " + plural(ins.size(), "line") + " at line " + std::to_string(idx + 1) + " of " + file,
-                      ",\"inserted_at\":" + std::to_string(idx + 1) + ",\"lines\":" + std::to_string(ins.size()));
+                      ",\"inserted_at\":" + std::to_string(idx + 1) + ",\"lines\":" + std::to_string(ins.size()), "insert");
 }
 
 // ------------------------------------------------------------------ delete
@@ -957,7 +962,7 @@ static int cmdDelete(const std::vector<std::string>& a) {
     t.lines = keep;
     if (t.lines.empty()) { t.lines.push_back(""); t.trailingNewline = false; }
     return finishEdit(p, file, fb, joinText(t), "deleted " + plural(count, "line") + " from " + file,
-                      ",\"deleted\":" + std::to_string(count));
+                      ",\"deleted\":" + std::to_string(count), "delete");
 }
 
 // ------------------------------------------------------------------ spell
@@ -1028,7 +1033,7 @@ static int cmdSpell(const std::vector<std::string>& a) {
             }
         }
     }
-    if (json && !quiet) printf("%s%s]\n", jsonOut.c_str(), firstJ ? "" : "\n");
+    if (json && !quiet && !wordsOnly) printf("%s%s]\n", jsonOut.c_str(), firstJ ? "" : "\n");
     if (wordsOnly && !quiet) for (auto& w : uniq) printf("%s\n", w.c_str());
     if (rc) return rc;
     return any ? EX_NOTFOUND : EX_OK;
@@ -1070,16 +1075,25 @@ static int cmdEdit(const std::vector<std::string>& a, size_t start) {
     if (!p.has("no-numbers")) o.numbers = cfg.numbers;
     o.theme = cfg.theme;
     o.logSize = cfg.logSize;
-    if (p.has("tabsize")) o.tabsize = atoi(p.get("tabsize").c_str());
+    if (p.has("tabsize")) {
+        long v;
+        if (!parseInt(p.get("tabsize"), v) || v < 1 || v > 32) return usageErr("edit", "bad --tabsize (expected 1-32)");
+        o.tabsize = (int)v;
+    }
     if (p.has("tabs")) o.indentMode = 1;
-    if (p.has("spaces")) { o.indentMode = 2; o.indentWidth = atoi(p.get("spaces").c_str()); if (o.indentWidth < 1) o.indentWidth = 4; }
+    if (p.has("spaces")) {
+        long v;
+        if (!parseInt(p.get("spaces"), v) || v < 1 || v > 16) return usageErr("edit", "bad --spaces (expected 1-16)");
+        o.indentMode = 2; o.indentWidth = (int)v;
+    }
     if (p.has("log-size")) {
         long v;
         if (!parseInt(p.get("log-size"), v) || v < 0) return usageErr("edit", "bad --log-size (0 = unlimited)");
         o.logSize = (size_t)v;
     }
-    o.spell = !p.has("no-spell");
-    o.numbers = !p.has("no-numbers");
+    // CLI flags only force OFF; otherwise the config/env value assigned above stands.
+    if (p.has("no-spell")) o.spell = false;
+    if (p.has("no-numbers")) o.numbers = false;
     o.readOnly = p.has("readonly");
     if (o.file.empty() || o.file == "-") {
         o.file.clear();
@@ -1176,8 +1190,9 @@ static int cmdConfig(const std::vector<std::string>& a) {
     }
     if (op == "set") {
         if (p.pos.size() != 3) return usageErr("config", "usage: hed config set KEY VALUE");
-        if (!configSet(c, p.pos[1], p.pos[2], err)) return fail(err);
-        if (!saveConfig(c, err)) return fail("could not write config: " + err);
+        Config stored = loadConfig(false);  // file + defaults only: don't bake HED_* env overrides into the file
+        if (!configSet(stored, p.pos[1], p.pos[2], err)) return fail(err);
+        if (!saveConfig(stored, err)) return fail("could not write config: " + err);
         printf("hed: %s = %s  (saved to %s)\n", p.pos[1].c_str(), p.pos[2].c_str(), configFilePath().c_str());
         return 0;
     }
@@ -1280,7 +1295,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (c == "-V" || c == "--version" || c == "version") {
-        printf("hed %s (C++17; dictionary: SymSpell en 82,765 words, MIT)\n", VERSION);
+        printf("hed %s (C++17; dictionary: SymSpell en 82,834 words, MIT)\n", VERSION);
         return 0;
     }
     if (c == "write" || c == "put" || c == "w") return cmdWrite(a);

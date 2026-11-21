@@ -15,7 +15,7 @@ A complete reference for the `hed` interactive editor — a nano-style, full-scr
 The editor supports:
 
 - **Syntax highlighting** for Python, Bash/sh/zsh, fish, JavaScript, TypeScript, SQL, HTML (with embedded `<script>`/`<style>`), CSS/SCSS, JSON, and Markdown.
-- **Spell checking** with an embedded 82,765-word SymSpell English frequency dictionary. In code, only comments and string literals are checked; identifiers, paths, URLs, camelCase, and acronyms are skipped.
+- **Spell checking** with an embedded 82,834-word SymSpell English frequency dictionary. In code, only comments and string literals are checked; identifiers, paths, URLs, camelCase, and acronyms are skipped.
 - **Pipe mode** — `cmd | hed | cmd2` works like `vipe`.
 - **UTF-8 / wide character** support, **CRLF preservation**, **bracketed paste**, **auto-indentation**, and **indentation style detection**.
 - **No runtime dependencies** — no ncurses, no hunspell, no data files.
@@ -454,7 +454,7 @@ hed log -n 5     # same
 
 ### 10.4 Crash recovery (swap files)
 
-While editing a named file, hed keeps a swap file at `~/.config/hed/swap/FILENAME.swp`. The buffer is flushed to it every ~30 seconds while dirty, so a crash (kill, power loss, terminal close) loses at most 30 seconds of edits. On the next start, if the swap file is newer than the original file, hed shows **"Swap file found, press R to recover"** — press `R` to restore the swap content, or any other key to discard it. The swap file is removed on a clean exit.
+While editing a named file, hed keeps a swap file at `~/.config/hed/swap/FILENAME.<path-hash>.swp` (the hash is of the full path, so same-named files in different directories never share or recover each other's swap). The buffer is flushed to it every ~30 seconds while dirty, so a crash (kill, power loss, terminal close) loses at most 30 seconds of edits. On the next start, if the swap file is newer than the original file, hed shows **"Swap file found, press R to recover"** — press `R` to restore the swap content, or any other key to discard it. The swap file is removed on a clean exit.
 
 ### 10.5 Shell completions
 

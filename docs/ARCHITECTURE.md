@@ -124,7 +124,7 @@ flowchart LR
 - **Search**: `find` (prompt with live preview), `findNext`, `replace` (interactive y/n/a). Smart-case: lowercase query = case-insensitive. `countMatches`/`matchIndex` drive a **`match X of Y` counter** in the status bar; the replace prompt shows `(X of Y)` plus a context snippet (`ln N: "…pre [MATCH] post…"`) via `matchContext`.
 - **Spell walk** (`spellWalk`): Iterates misspellings, offers up to **6** suggestions (keys `1`–`6`), add-to-dictionary, ignore, edit, or skip.
 - **Status message log**: every status message is appended to `~/.config/hed/log/YYYY-MM-DD.log` and kept in an in-memory ring buffer sized by `log_size` (config), so `hed log` can show it later.
-- **Crash recovery (swap files)**: while editing a named file, the buffer is flushed to `~/.config/hed/swap/FILENAME.swp` every ~30 s while dirty. On startup, if the swap file is newer than the original, hed prompts **"Swap file found, press R to recover"** (`R` restores, any other key discards). The swap file is removed on a clean exit.
+- **Crash recovery (swap files)**: while editing a named file, the buffer is flushed to `~/.config/hed/swap/FILENAME.<path-hash>.swp` every ~30 s while dirty (the hash is of the full path, so same-basename files in different directories never collide). On startup, if the swap file is newer than the original, hed prompts **"Swap file found, press R to recover"** (`R` restores, any other key discards). The swap file is removed on a clean exit.
 - **Config + themes**: editor settings (tab size, indent, spell, numbers, theme, log size) are loaded from `~/.config/hed/config` via `loadConfig()` (precedence: CLI flags > `HED_*` env vars > config file > defaults). The syntax theme is applied via `setTheme()`: three palettes are built in (`catppuccin` | `dark` | `light`) and any other name is loaded from a custom theme file at `~/.config/hed/themes/<name>.theme`.
 - **Missing-terminal error**: if no TTY is available, hed prints a clear message pointing to the one-shot commands and exits 2.
 - **Pipe mode**: When stdin/stdout is not a TTY, opens `/dev/tty` for the editor UI. On `^X`, writes buffer to stdout. On `^Q`, exits with code 1.
@@ -143,7 +143,7 @@ flowchart LR
 
 ### spell.cpp — Spell Checker
 
-- **Dictionary**: Embedded SymSpell `frequency_dictionary_en_82_765.txt` (82,765 words, MIT, Wolf Garbe). Linked at build time via `hed_dict_data`/`hed_dict_end` symbols. Overridable with `HED_DICT` env var.
+- **Dictionary**: Embedded SymSpell `frequency_dictionary_en_82_765.txt` (82,834 entries, MIT, Wolf Garbe). Linked at build time via the `hed_dict_data` byte array and an explicit `hed_dict_size` symbol (a size symbol, not pointer subtraction, so it is independent of linker section ordering). Overridable with `HED_DICT` env var.
 - **Additional word sources**: `TECH_WORDS` (built-in ~400 tech terms at frequency 50 000), `~/.config/hed/words.txt` (user dictionary, freq 100 000), `HED_EXTRA_DICTS` (colon-separated paths, freq 1 000).
 - **Singleton**: `Speller::instance()` — loaded once on first use via `ensureLoaded()`.
 - **Known-word check** (`known`): Lowercases, normalises apostrophes (Unicode → ASCII). Checks dictionary, contractions (`'s`, `'d`, `'m`, `'ll`, `'re`, `'ve`, `'t`), irregular negatives (`can't`, `won't`), and affix stripping (`affixKnown` — 35 suffix rules, 17 prefix rules, doubled-consonant handling).
@@ -387,7 +387,7 @@ which highlight types are spell-checkable:
 flowchart TD
     A[Speller::ensureLoaded] --> B{HED_DICT env set?}
     B -->|yes| C[Read file from HED_DICT path]
-    B -->|no| D[Use embedded hed_dict_data<br/>82 765 words, SymSpell en]
+    B -->|no| D[Use embedded hed_dict_data<br/>82 834 words, SymSpell en]
     C --> E[loadList: parse word + optional frequency]
     D --> E
     E --> F[Add TECH_WORDS ~400 terms at freq 50 000]

@@ -15,12 +15,12 @@ _hed() {
   local cmd=${words[2]}
   local -a opts
   case $cmd in
-    write)   opts=(--content --from --append --mode --parents --backup --no-clobber --strip-tabs --dedent --escapes --no-eol --diff --show --spell --quiet);;
+    write)   opts=(--content --from --append --mode --parents --backup --no-clobber --strip-tabs --dedent --escapes --no-eol --diff --show --spell --quiet --lang);;
     show)    opts=(--number --range --lang --spell --color);;
     search)  opts=(--regex --ignore-case --smart-case --word --context --count --files --max --json --fixed --line-number);;
     replace) opts=(--old --new --old-file --new-file --all --nth --expect --regex --ignore-case --range --escapes --dry-run --backup --context --quiet --json);;
-    insert)  opts=(--content --from --at --before --after --start --end --after-match --before-match --first --match-indent --dedent --strip-tabs --escapes --dry-run --backup --quiet --json);;
-    delete)  opts=(--range --lines --match --regex --all --dry-run --backup --quiet --json);;
+    insert)  opts=(--content --from --at --before --after --start --end --after-match --before-match --first --match-indent --dedent --strip-tabs --escapes --dry-run --backup --context --quiet --json);;
+    delete)  opts=(--range --lines --match --regex --all --dry-run --backup --context --quiet --json);;
     spell)   opts=(--lang --all-text --suggest --words --add --json --quiet);;
     config)  opts=(get set);;
     log)     opts=(--lines);;
@@ -31,8 +31,6 @@ _hed() {
   case ${words[CURRENT-1]} in
     -l|--lang) _values 'language' $_hed_langs; return;;
     --color)   _values 'color' auto always never; return;;
-    --theme)   _values 'theme' catppuccin dark light; return;;
-    --indent)  _values 'indent' auto tabs spaces; return;;
   esac
   _arguments -s : $opts
   _files

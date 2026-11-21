@@ -113,7 +113,7 @@ All line numbers are **1-based** and **inclusive**.
 
 | Variable | Description |
 |----------|-------------|
-| `HED_DICT` | Path to a replacement spell-check dictionary file. Format: one word per line, optionally followed by whitespace and a frequency number. Overrides the built-in 82,765-word SymSpell English dictionary. |
+| `HED_DICT` | Path to a replacement spell-check dictionary file. Format: one word per line, optionally followed by whitespace and a frequency number. Overrides the built-in 82,834-word SymSpell English dictionary. If the path is unreadable, `hed spell` exits 2 with an error (it does not silently fall back). |
 | `HED_EXTRA_DICTS` | Colon-separated (`:`) list of additional dictionary files. Same format as `HED_DICT`. Loaded in addition to the primary dictionary. Words are assigned frequency 1000. |
 | `NO_COLOR` | When set (any value), disables color output under `--color=auto`. Ignored with `--color=always`. |
 | `TERM` | When set to `dumb`, disables color output under `--color=auto`. |
@@ -147,7 +147,7 @@ All file-modifying commands (`write`, `replace`, `insert`, `delete`) write atomi
 
 ### Backups
 
-`-b`/`--backup` copies the existing file to `DIR/YYYYmmddHHMMSS-NAME` before making any change. The backup preserves the original file's mode.
+`-b`/`--backup` copies the existing file to `DIR/YYYYmmddHHMMSS-NAME` before making any change. The backup preserves the original file's mode. If a backup with that name already exists (e.g. two edits within the same second), a `-2`, `-3`, … suffix is added so earlier backups are never clobbered.
 
 ### CRLF handling
 
@@ -317,7 +317,7 @@ hed grep PATTERN [FILE...] [options]
 hed find PATTERN [FILE...] [options]
 ```
 
-Searches for PATTERN in files or stdin. Literal search by default. Output format: `[FILE:]LINE:COL:TEXT` with the matching portion highlighted in color. Multiple files prefix each line with the filename.
+Searches for PATTERN in files or stdin. Literal search by default. Output format: `[FILE:]LINE:COL:TEXT` with the matching portion highlighted in color. `LINE` and `COL` are 1-based; `COL` is a byte offset (not a display column). Multiple files prefix each line with the filename.
 
 #### Options
 
@@ -701,11 +701,11 @@ hed delete app.py --match 'deprecated' -b
 hed spell [FILE...]
 ```
 
-Spell-checks files or stdin. Uses an 82,765-word frequency-ranked English dictionary (SymSpell, MIT) embedded in the binary, plus a built-in tech vocabulary, affix analysis (suffixes/prefixes), and contraction handling.
+Spell-checks files or stdin. Uses an 82,834-word frequency-ranked English dictionary (SymSpell, MIT) embedded in the binary, plus a built-in tech vocabulary, affix analysis (suffixes/prefixes), and contraction handling.
 
 In source code files, only **comments and string literals** are checked. Identifiers, paths, URLs, camelCase, and ACRONYMS are skipped. In Markdown, text, and HTML files, all text content is checked.
 
-Output format: `[FILE:]LINE:COL: word -> suggestion1, suggestion2, ...`
+Output format: `[FILE:]LINE:COL: word -> suggestion1, suggestion2, ...` (`LINE`/`COL` are 1-based; `COL` is a byte offset). With `--words`, only the unique misspelled words are printed (one per line); `--json` is ignored in that mode.
 
 #### Options
 
@@ -850,7 +850,7 @@ When no command name is given, `hed FILE` opens the editor. This is the default 
 | `--spaces` | — | N | Indent with N spaces (minimum 1, default 4). |
 | `--no-spell` | — | — | Disable spell-check underlining at startup. |
 | `--no-numbers` | — | — | Hide line numbers. |
-| `--readonly` | `-R` | — | Open in view-only mode (no saving). |
+| `--readonly` | `-R` | — | Open in view-only mode: editing keys and `^S` are disabled; `^O` can still save a copy to a different file. |
 | `--line` | — | N | Open at line N (negative = from end). |
 
 #### Position syntax
@@ -895,7 +895,7 @@ When no command name is given, `hed FILE` opens the editor. This is the default 
 
 #### Crash recovery (swap files)
 
-While editing a named file, hed keeps a swap file at `~/.config/hed/swap/FILENAME.swp`, flushed every ~30 seconds while the buffer is dirty. If hed is killed (crash, power loss, terminal close), at most 30 seconds of edits are lost. On the next start, if the swap file is newer than the original file, hed shows **"Swap file found, press R to recover"** — press `R` to restore, any other key to discard. The swap file is removed on a clean exit.
+While editing a named file, hed keeps a swap file at `~/.config/hed/swap/FILENAME.<path-hash>.swp` (hashed from the full path so same-named files in different directories never collide), flushed every ~30 seconds while the buffer is dirty. If hed is killed (crash, power loss, terminal close), at most 30 seconds of edits are lost. On the next start, if the swap file is newer than the original file, hed shows **"Swap file found, press R to recover"** — press `R` to restore, any other key to discard. The swap file is removed on a clean exit.
 
 #### Missing-terminal error
 
@@ -952,7 +952,7 @@ hed config get KEY
 hed config set KEY VALUE
 ```
 
-Views or edits the editor configuration file `~/.config/hed/config` (or `$XDG_CONFIG_HOME/hed/config`), an INI-style file with an `[editor]` section. With no arguments it prints the file path and the effective settings; `get KEY` prints one setting; `set KEY VALUE` validates, saves, and confirms.
+Views or edits the editor configuration file `~/.config/hed/config` (or `$XDG_CONFIG_HOME/hed/config`), an INI-style file with an `[editor]` section. With no arguments it prints the file path and the effective settings; `get KEY` prints one setting; `set KEY VALUE` validates, saves, and confirms. `get`/no-args report the *effective* value (including `HED_*` overrides), but `set` writes only the stored file value — it does not bake current environment overrides into the file.
 
 | Setting | Values | Meaning |
 |---------|--------|---------|

@@ -937,10 +937,10 @@ std::vector<std::pair<std::string, bool>> availableThemes() {
 std::string themeTemplate(const std::string& name) {
     const Palette* p = &PAL_CAT;
     std::string src = "catppuccin";
+    Palette custom;  // function scope: p may point at it below
     if (name == "dark") { p = &PAL_DARK; src = "dark"; }
     else if (name == "light") { p = &PAL_LIGHT; src = "light"; }
     else {
-        Palette custom;
         if (loadCustomTheme(name, custom)) { p = &custom; src = name; }
     }
     std::string out =

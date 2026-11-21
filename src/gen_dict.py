@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Generates src/dict_embed.inc from data/en_freq.txt: C definitions of the
-# hed_dict_data / hed_dict_end symbols as string literals. This is the portable
+# hed_dict_data / hed_dict_size symbols. This is the portable
 # replacement for the GNU-assembler src/dict_embed.S (which used directives the
 # macOS assembler rejects), so the same build works on Linux, macOS, and WSL.
 #
@@ -41,10 +41,10 @@ def main():
     out.append("extern const char hed_dict_data[] =\n")
     out.append(cstr(data))
     out.append(";\n")
-    # One byte past the data, mirroring the original .S (hed_dict_end: .byte 0).
-    out.append("extern const char hed_dict_end[] =\n")
-    out.append(cstr(b"\0"))
-    out.append(";\n")
+    # Explicit byte count. Subtracting pointers to two distinct objects
+    # (hed_dict_end - hed_dict_data) is undefined behaviour and depends on
+    # linker section ordering; a size symbol is layout-independent.
+    out.append("extern const unsigned long hed_dict_size = %d;\n" % len(data))
 
     with open(sys.argv[2], "w") as f:
         f.write("".join(out))
