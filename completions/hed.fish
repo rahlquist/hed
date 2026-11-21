@@ -1,5 +1,5 @@
 # fish completion for hed  (SPDX-License-Identifier: MIT)
-set -l cmds write show search replace insert delete spell langs config theme log edit help
+set -l cmds write show search replace insert delete spell langs config theme log lint yaml edit help
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a write   -d 'Write stdin/-c text to a file (heredoc replacement)'
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a show    -d 'Print with highlighting / line numbers'
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a search  -d 'Find matches'
@@ -10,10 +10,12 @@ complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a spell   -d 'Spell-
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a langs   -d 'List languages'
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a config  -d 'View/edit editor config'
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a log     -d 'Show editor status log'
+complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a lint    -d 'Validate YAML syntax'
+complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a yaml    -d 'One-shot YAML editing'
 complete -c hed -n "not __fish_seen_subcommand_from $cmds" -a edit    -d 'Interactive editor'
 complete -c hed -s h -l help -d 'Show help'
 complete -c hed -l color -x -a 'auto always never'
-complete -c hed -s l -l lang -x -a 'python bash fish javascript typescript sql html css json markdown text'
+complete -c hed -s l -l lang -x -a 'python bash fish javascript typescript sql html css json markdown yaml text'
 
 # write
 complete -c hed -n '__fish_seen_subcommand_from write' -s c -l content -x -d 'Text to write'

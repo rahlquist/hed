@@ -77,6 +77,21 @@ Themes: `catppuccin`, `dark`, `light`. The editor also supports mouse (click to 
 cursor, wheel to scroll), crash recovery via swap files (`~/.config/hed/swap/`), and
 live search/replace feedback (`match X of Y`). `hed langs --help` lists languages.
 
+## YAML support
+```bash
+hed show config.yaml -n              # syntax highlighting
+hed lint config.yaml                # validate syntax
+hed lint config.yaml --json         # JSON output
+hed yaml config.yaml get services.web.image
+hed yaml config.yaml set services.web.image redis
+hed yaml config.yaml delete services.web.ports
+hed yaml config.yaml list services.web.ports
+hed yaml config.yaml set services.web.restart always   # creates key if missing
+```
+Path syntax: dot-separated keys, `[N]` for array indices (e.g., `services.web.ports[0]`).
+`set` infers types (string, int, float, bool, null) and preserves formatting.
+Exit codes: 0 success, 1 path not found, 2 error.
+
 ## Rules of thumb
 * Prefer `hed replace` over rewriting whole files; prefer `hed write` over heredocs.
 * Quote OLD/NEW with single quotes. Don't use `sed -i` for code edits.
