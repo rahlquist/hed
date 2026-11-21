@@ -1,6 +1,6 @@
 # hed — CLI Reference
 
-Complete reference for every command, option, environment variable, and syntax element of `hed` (v1.0.0).
+Complete reference for every command, option, environment variable, and syntax element of `hed` (v1.2.0).
 
 ---
 
