@@ -46,6 +46,7 @@ def check(name, cond):
 
 os.chdir(tempfile.mkdtemp())
 os.environ["HOME"] = os.getcwd()   # isolate config/themes from the real home
+os.environ["XDG_CONFIG_HOME"] = os.path.join(os.getcwd(), ".config")  # hed honours XDG_CONFIG_HOME; pin it inside the sandbox too
 run(["new.py"], ["def f(x):\r", "return x\r", C("s"), C("x")])
 check("auto-indent + save", get("new.py").startswith("def f(x):\n    return x\n"))
 
