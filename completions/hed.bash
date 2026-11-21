@@ -6,8 +6,6 @@ _hed() {
     case "$prev" in
         -l|--lang) COMPREPLY=($(compgen -W "python bash fish javascript typescript sql html css json markdown text" -- "$cur")); return;;
         --color) COMPREPLY=($(compgen -W "auto always never" -- "$cur")); return;;
-        --theme) COMPREPLY=($(compgen -W "catppuccin dark light" -- "$cur")); return;;
-        --indent) COMPREPLY=($(compgen -W "auto tabs spaces" -- "$cur")); return;;
     esac
     if [[ $COMP_CWORD -eq 1 ]]; then
         COMPREPLY=($(compgen -W "$cmds" -- "$cur") $(compgen -f -- "$cur")); return
@@ -19,8 +17,8 @@ _hed() {
             show)    opts+=" --number --range --lang --spell --color";;
             search)  opts+=" --regex --ignore-case --smart-case --word --context --count --files --max --json --fixed --line-number";;
             replace) opts+=" --old --new --old-file --new-file --all --nth --expect --regex --ignore-case --range --escapes --dry-run --backup --context --quiet --json";;
-            insert)  opts+=" --content --from --at --before --after --start --end --after-match --before-match --first --match-indent --dedent --strip-tabs --escapes --dry-run --backup --quiet --json";;
-            delete)  opts+=" --range --lines --match --regex --all --dry-run --backup --quiet --json";;
+            insert)  opts+=" --content --from --at --before --after --start --end --after-match --before-match --first --match-indent --dedent --strip-tabs --escapes --dry-run --backup --context --quiet --json";;
+            delete)  opts+=" --range --lines --match --regex --all --dry-run --backup --context --quiet --json";;
             spell)   opts+=" --lang --all-text --suggest --words --add --json --quiet";;
             config)  opts+=" --help";;
             log)     opts+=" --lines --help";;

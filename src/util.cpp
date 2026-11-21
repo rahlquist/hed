@@ -127,13 +127,13 @@ bool isDir(const std::string& p) {
 
 // Modification time in nanoseconds since the epoch (so same-second edits are
 // still ordered correctly, e.g. for swap-file crash recovery). -1 if missing.
-long fileMtime(const std::string& p) {
+int64_t fileMtime(const std::string& p) {
     struct stat st;
     if (stat(p.c_str(), &st) != 0) return -1;
 #if defined(__APPLE__)
-    return (long)st.st_mtimespec.tv_sec * 1000000000L + (long)st.st_mtimespec.tv_nsec;
+    return (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + (int64_t)st.st_mtimespec.tv_nsec;
 #else
-    return (long)st.st_mtim.tv_sec * 1000000000L + (long)st.st_mtim.tv_nsec;
+    return (int64_t)st.st_mtim.tv_sec * 1000000000LL + (int64_t)st.st_mtim.tv_nsec;
 #endif
 }
 
@@ -229,7 +229,10 @@ bool makeBackup(const std::string& path, std::string& backupPath, std::string& e
     localtime_r(&now, &tmv);
     strftime(ts, sizeof ts, "%Y%m%d%H%M%S", &tmv);
     std::string dir = dirName(path);
-    backupPath = (dir == "." && path.find('/') == std::string::npos ? std::string() : dir + "/") + ts + "-" + baseName(path);
+    std::string base = (dir == "." && path.find('/') == std::string::npos ? std::string() : dir + "/") + ts + "-" + baseName(path);
+    backupPath = base;
+    // Same-second edits must not clobber an earlier backup: pick a free suffix.
+    for (int n = 2; pathExists(backupPath); n++) backupPath = base + "-" + std::to_string(n);
     struct stat st;
     int mode = stat(path.c_str(), &st) == 0 ? (int)(st.st_mode & 07777) : -1;
     return atomicWrite(backupPath, data, err, mode);
@@ -385,7 +388,7 @@ bool parseRange(const std::string& specIn, size_t total, size_t& a, size_t& b, s
         else if (r[0] == '+') {
             long n;
             if (!parseNum(r.substr(1), n)) return bad();
-            B = A + n;
+            B = n > LONG_MAX - A ? LONG_MAX : A + n;  // clamp: avoid signed overflow on huge +N
         } else if (!parseNum(r, B)) return bad();
         else if (B < 0) B = (long)total + B + 1;
     }

@@ -14,7 +14,7 @@
 
 extern "C" {
 extern const char hed_dict_data[];
-extern const char hed_dict_end[];
+extern const unsigned long hed_dict_size;
 }
 
 namespace hed {
@@ -83,10 +83,10 @@ bool Speller::ensureLoaded() {
     const char* env = getenv("HED_DICT");
     if (env && *env) {
         std::string data;
-        if (readFile(env, data, err)) loadList(data.data(), data.size(), 1000);
-        else error_ = "HED_DICT: " + err;
+        if (!readFile(env, data, err)) { error_ = "HED_DICT: " + err; return false; }
+        loadList(data.data(), data.size(), 1000);
     } else {
-        loadList(hed_dict_data, (size_t)(hed_dict_end - hed_dict_data), 1000);
+        loadList(hed_dict_data, (size_t)hed_dict_size, 1000);
     }
     {
         std::string w;

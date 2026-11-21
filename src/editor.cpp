@@ -59,6 +59,20 @@ void onFatal(int sig) {
 
 using Clock = std::chrono::steady_clock;
 
+// Swap files are keyed by a hash of the full path so that two files with the
+// same basename in different directories never share (or recover) each other's
+// swap. FNV-1a over the path string.
+static uint64_t pathHash(const std::string& s) {
+    uint64_t h = 1469598103934665603ULL;
+    for (unsigned char c : s) { h ^= c; h *= 1099511628211ULL; }
+    return h;
+}
+static std::string swapNameFor(const std::string& file) {
+    char buf[32];
+    snprintf(buf, sizeof buf, "%016llx", (unsigned long long)pathHash(file));
+    return baseName(file) + "." + buf + ".swp";
+}
+
 class Editor {
   public:
     explicit Editor(const EditorOptions& o) : opt(o) {}
@@ -1288,6 +1302,7 @@ class Editor {
 
     // ---- files
     bool save(bool askName) {
+        if (readOnly && !askName) { setMsg("Read-only buffer (use ^O to save elsewhere)"); return false; }
         std::string name = filename;
         if (name.empty() || askName) {
             if (!prompt("File name to write: ", name) || name.empty()) { setMsg("Save cancelled"); return false; }
@@ -1296,6 +1311,8 @@ class Editor {
                 if (k != 'y' && k != 'Y') { setMsg("Save cancelled"); return false; }
             }
         }
+        // Don't rewrite an unchanged file: preserves inode, hard links, mtime and xattrs.
+        if (!askName && name == filename && !dirty()) { setMsg("No changes to save"); return true; }
         Text t;
         t.lines = L;
         t.trailingNewline = trailingNl;
@@ -1481,9 +1498,9 @@ class Editor {
         std::string sdir = configDir() + "/swap";
         std::string err;
         if (!mkdirParents(sdir, err)) return false;
-        swapPath = sdir + "/" + baseName(filename) + ".swp";
-        long origMt = pathExists(filename) ? fileMtime(filename) : -1;
-        long swMt = pathExists(swapPath) ? fileMtime(swapPath) : -1;
+        swapPath = sdir + "/" + swapNameFor(filename);
+        int64_t origMt = pathExists(filename) ? fileMtime(filename) : -1;
+        int64_t swMt = pathExists(swapPath) ? fileMtime(swapPath) : -1;
         if (swMt >= 0 && origMt >= 0 && swMt <= origMt) {
             unlink(swapPath.c_str());  // stale swap (older than the file): discard
             swMt = -1;
@@ -1535,6 +1552,7 @@ class Editor {
         detectIndent();
         sp = &Speller::instance();
         spellOn = opt.spell && sp->ensureLoaded();
+        if (opt.spell && !sp->ok()) setMsg("Spell checker unavailable: " + sp->error());
         if (opt.line != 0) {
             long ln = opt.line < 0 ? (long)L.size() + opt.line + 1 : opt.line;
             if (ln < 1) ln = 1;
@@ -1679,7 +1697,7 @@ void cfgApplyEnv(Config& c) {
 
 std::string configFilePath() { return configDir() + "/config"; }
 
-Config loadConfig() {
+Config loadConfig(bool applyEnv) {
     Config c;  // built-in defaults
     std::string data, err;
     if (readFile(configFilePath(), data, err)) {
@@ -1703,7 +1721,7 @@ Config loadConfig() {
             cfgApply(c, key, val);  // ignore malformed/unknown keys
         }
     }
-    cfgApplyEnv(c);  // environment beats the file
+    if (applyEnv) cfgApplyEnv(c);  // environment beats the file
     return c;
 }
 

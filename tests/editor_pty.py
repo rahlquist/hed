@@ -100,5 +100,72 @@ check("custom theme SGR rendered", b"\x1b[38;5;196m" in cap and b"\x1b[38;5;220m
 check("custom theme overrides default", b"\x1b[3;38;5;244m" not in cap)
 del os.environ["HED_THEME"]
 
+# --- regression: audit fixes ---
+# F4: config spell/numbers must be honoured (precedence CLI > env > config > default)
+for v in ("HED_SPELL", "HED_NUMBERS", "XDG_CONFIG_HOME"):
+    os.environ.pop(v, None)
+with open(os.path.join(os.getcwd(), ".config", "hed", "config"), "w") as f:
+    f.write("[editor]\nspell = false\nnumbers = false\n")
+put("cfg.txt", "one teh\ntwo\n")
+_, cap = run(["cfg.txt"], [C("x")], capture=True)
+check("config spell=false honoured", b"  spell" not in cap and b"4;38;5;203" not in cap)
+check("config numbers=false honoured", b"\x1b[38;5;239m" not in cap and b"\x1b[38;5;250m" not in cap)
+os.environ["HED_SPELL"] = "true"; os.environ["HED_NUMBERS"] = "true"
+_, cap = run(["cfg.txt"], [C("x")], capture=True)
+check("env spell/numbers beat config", b"  spell" in cap and b"\x1b[38;5;239m" in cap)
+del os.environ["HED_SPELL"]; del os.environ["HED_NUMBERS"]
+os.environ["HED_SPELL"] = "true"
+_, cap = run(["cfg.txt", "--no-spell"], [C("x")], capture=True)
+check("--no-spell beats env", b"  spell" not in cap)
+del os.environ["HED_SPELL"]
+
+# F7: ^S on a clean buffer must not rewrite the file (preserve inode / hard links)
+put("hl.txt", "hello\n")
+os.link("hl.txt", "hl.txt.hard")
+ino_before = os.stat("hl.txt").st_ino
+run(["hl.txt"], [C("s"), C("x")])
+check("clean save keeps inode/hardlink", os.stat("hl.txt").st_ino == ino_before and os.stat("hl.txt").st_nlink == 2)
+put("ro.txt", "orig\n")
+ino_ro = os.stat("ro.txt").st_ino
+run(["ro.txt", "-R"], [C("s"), C("x")])
+check("read-only save does not rewrite", os.stat("ro.txt").st_ino == ino_ro)
+
+# F5: swap files must be keyed by full path, not basename (no cross-file recovery).
+def run_kill(args, keys, capture=False, timeout=3.0):
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ["TERM"] = "xterm-256color"
+        os.execv(H, [H] + args)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+    out = []
+    def drain(t):
+        end = time.time() + t
+        while time.time() < end:
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if r:
+                try:
+                    d = os.read(fd, 65536)
+                    if d and capture: out.append(d)
+                except OSError: return
+    drain(0.4)
+    for k in keys:
+        os.write(fd, k.encode()); drain(0.15)
+    drain(0.3)
+    end = time.time() + timeout
+    while time.time() < end:
+        w, _ = os.waitpid(pid, os.WNOHANG)
+        if w: break
+        time.sleep(0.05)
+    else:
+        os.kill(pid, signal.SIGKILL); os.waitpid(pid, 0)
+    return b"".join(out)
+
+os.makedirs("swa", exist_ok=True); os.makedirs("swb", exist_ok=True)
+put("swa/foo.txt", "AAA\n"); put("swb/foo.txt", "BBB\n")
+os.utime("swa/foo.txt", (1000000000, 1000000000)); os.utime("swb/foo.txt", (1000000000, 1000000000))
+run_kill(["swa/foo.txt"], [])                       # leaves a swap for swa/foo.txt behind
+cap = run_kill(["swb/foo.txt"], [], capture=True)   # opening swb/foo.txt must not offer swa's swap
+check("no cross-file swap recovery", b"Swap file found" not in cap)
+
 print(f"passed: {sum(results)}  failed: {len(results) - sum(results)}")
 sys.exit(0 if all(results) else 1)
